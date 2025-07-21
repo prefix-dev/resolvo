@@ -57,7 +57,7 @@ fn main() {
         .unwrap();
 
     // Generate a range of problems.
-    let mut rng = StdRng::seed_from_u64(0);
+    let mut rng = StdRng::seed_from_u64(opts.seed);
     let requirement_dist = WeightedIndex::new([
         10, // 10 times more likely to pick a package
         if !snapshot.version_sets.is_empty() {
