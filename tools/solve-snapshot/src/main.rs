@@ -10,7 +10,10 @@ use console::style;
 use csv::WriterBuilder;
 use itertools::Itertools;
 use rand::{
-    distr::{weighted::WeightedIndex, Distribution}, prelude::IteratorRandom, rngs::StdRng, Rng, SeedableRng
+    Rng, SeedableRng,
+    distr::{Distribution, weighted::WeightedIndex},
+    prelude::IteratorRandom,
+    rngs::StdRng,
 };
 use resolvo::{Problem, Requirement, Solver, UnsolvableOrCancelled, snapshot::DependencySnapshot};
 
