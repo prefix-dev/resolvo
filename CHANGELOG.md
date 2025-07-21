@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.9.1...resolvo-v0.9.2) - 2025-07-21
+
+### Other
+
+- *(ci)* bump prefix-dev/setup-pixi from 0.8.11 to 0.8.12 ([#157](https://github.com/prefix-dev/resolvo/pull/157))
+- update all dependencies ([#154](https://github.com/prefix-dev/resolvo/pull/154))
+- *(ci)* bump prefix-dev/setup-pixi from 0.8.10 to 0.8.11 ([#155](https://github.com/prefix-dev/resolvo/pull/155))
+- bump petgrpah version ([#153](https://github.com/prefix-dev/resolvo/pull/153))
+- making graph structs public for external consumption ([#152](https://github.com/prefix-dev/resolvo/pull/152))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#149](https://github.com/prefix-dev/resolvo/pull/149))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.107 to 0.5.108 ([#150](https://github.com/prefix-dev/resolvo/pull/150))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#141](https://github.com/prefix-dev/resolvo/pull/141))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.105 to 0.5.107 ([#142](https://github.com/prefix-dev/resolvo/pull/142))
+- *(ci)* bump prefix-dev/setup-pixi from 0.8.8 to 0.8.10 ([#144](https://github.com/prefix-dev/resolvo/pull/144))
+- make ConflictGraph simplify public ([#147](https://github.com/prefix-dev/resolvo/pull/147))
+- add Clone to ConflictGraph ([#145](https://github.com/prefix-dev/resolvo/pull/145))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#135](https://github.com/prefix-dev/resolvo/pull/135))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#134](https://github.com/prefix-dev/resolvo/pull/134))
+- *(ci)* bump prefix-dev/setup-pixi from 0.8.7 to 0.8.8 ([#130](https://github.com/prefix-dev/resolvo/pull/130))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.104 to 0.5.105 ([#129](https://github.com/prefix-dev/resolvo/pull/129))
+
 ## [0.9.1](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.9.0...resolvo-v0.9.1) - 2025-05-05
 
 ### Fixed
