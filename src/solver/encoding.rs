@@ -44,10 +44,10 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     conflicting_clauses: Vec<ClauseId>,
 
     /// Stores for which packages and solvables we want to add forbid clauses.
-    pending_forbid_clauses: IndexMap<NameId, Vec<VariableId>>,
+    pending_forbid_clauses: IndexMap<NameId, Vec<VariableId>, ahash::RandomState>,
 
     /// A set of packages that should have an at-least-once tracker.
-    new_at_least_one_packages: IndexMap<NameId, VariableId>,
+    new_at_least_one_packages: IndexMap<NameId, VariableId, ahash::RandomState>,
 }
 
 /// The result of a future that was queued for processing.
@@ -106,7 +106,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             conflicting_clauses: Vec::new(),
             pending_forbid_clauses: IndexMap::default(),
             level,
-            new_at_least_one_packages: IndexMap::new(),
+            new_at_least_one_packages: IndexMap::default(),
         }
     }
 

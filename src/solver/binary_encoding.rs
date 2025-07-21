@@ -6,7 +6,7 @@ use indexmap::IndexSet;
 /// that at most one of a set of variables can be true.
 pub(crate) struct AtMostOnceTracker<V> {
     /// The set of variables of which at most one can be assigned true.
-    pub(crate) variables: IndexSet<V>,
+    pub(crate) variables: IndexSet<V, ahash::RandomState>,
     pub(crate) helpers: Vec<V>,
 }
 
