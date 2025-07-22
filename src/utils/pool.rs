@@ -3,11 +3,14 @@ use std::{
     hash::Hash,
 };
 
-use crate::internal::{
-    arena::Arena,
-    frozen_copy_map::FrozenCopyMap,
-    id::{NameId, SolvableId, StringId, VersionSetId, VersionSetUnionId},
-    small_vec::SmallVec,
+use crate::{
+    Condition, ConditionId,
+    internal::{
+        arena::Arena,
+        frozen_copy_map::FrozenCopyMap,
+        id::{NameId, SolvableId, StringId, VersionSetId, VersionSetUnionId},
+        small_vec::SmallVec,
+    },
 };
 
 /// A solvable represents a single candidate of a package.
@@ -49,6 +52,12 @@ pub struct Pool<VS: VersionSet, N: PackageName = String> {
     /// Map from version set to the id of their interned counterpart
     version_set_to_id: FrozenCopyMap<(NameId, VS), VersionSetId, ahash::RandomState>,
 
+    /// Conditions that can be used to filter solvables.
+    conditions: Arena<ConditionId, Condition>,
+
+    /// Map from condition to its id
+    pub(crate) condition_to_id: FrozenCopyMap<Condition, ConditionId, ahash::RandomState>,
+
     version_set_unions: Arena<VersionSetUnionId, SmallVec<VersionSetId>>,
 }
 
@@ -65,6 +74,8 @@ impl<VS: VersionSet, N: PackageName> Default for Pool<VS, N> {
             version_set_to_id: Default::default(),
             version_sets: Arena::new(),
             version_set_unions: Arena::new(),
+            conditions: Arena::new(),
+            condition_to_id: Default::default(),
         }
     }
 }
@@ -212,6 +223,23 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
         id: VersionSetUnionId,
     ) -> impl Iterator<Item = VersionSetId> + '_ {
         self.version_set_unions[id].iter().copied()
+    }
+
+    /// Resolve the condition associated with the provided id.
+    pub fn resolve_condition(&self, id: ConditionId) -> &Condition {
+        &self.conditions[id]
+    }
+
+    /// Interns a condition into the pool and returns its `ConditionId`.
+    /// Conditions are deduplicated, so if the same condition is inserted
+    /// twice the same `ConditionId` will be returned.
+    pub fn intern_condition(&self, condition: Condition) -> ConditionId {
+        if let Some(id) = self.condition_to_id.get_copy(&condition) {
+            return id;
+        }
+        let id = self.conditions.alloc(condition.clone());
+        self.condition_to_id.insert_copy(condition, id);
+        id
     }
 }
 
