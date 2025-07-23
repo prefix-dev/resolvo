@@ -52,13 +52,13 @@ pub struct Pool<VS: VersionSet, N: PackageName = String> {
     /// Map from version set to the id of their interned counterpart
     version_set_to_id: FrozenCopyMap<(NameId, VS), VersionSetId, ahash::RandomState>,
 
+    version_set_unions: Arena<VersionSetUnionId, SmallVec<VersionSetId>>,
+
     /// Conditions that can be used to filter solvables.
     conditions: Arena<ConditionId, Condition>,
 
     /// Map from condition to its id
-    pub(crate) condition_to_id: FrozenCopyMap<Condition, ConditionId, ahash::RandomState>,
-
-    version_set_unions: Arena<VersionSetUnionId, SmallVec<VersionSetId>>,
+    condition_to_id: FrozenCopyMap<Condition, ConditionId, ahash::RandomState>,
 }
 
 impl<VS: VersionSet, N: PackageName> Default for Pool<VS, N> {
