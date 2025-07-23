@@ -20,5 +20,5 @@ resolvo = { path = "../" }
 
 [build-dependencies]
 anyhow = "1"
-cbindgen = "0.28.0"
+cbindgen = "0.29.0"
 

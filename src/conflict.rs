@@ -218,7 +218,7 @@ impl Conflict {
 
 /// A node in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub(crate) enum ConflictNode {
+pub enum ConflictNode {
     /// Node corresponding to a solvable
     Solvable(SolvableOrRootId),
     /// Node representing a dependency without candidates
@@ -247,7 +247,7 @@ impl ConflictNode {
 
 /// An edge in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) enum ConflictEdge {
+pub enum ConflictEdge {
     /// The target node is a candidate for the dependency specified by the
     /// [`Requirement`]
     Requires(Requirement),
@@ -273,7 +273,7 @@ impl ConflictEdge {
 
 /// Conflict causes
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) enum ConflictCause {
+pub enum ConflictCause {
     /// The solvable is locked
     Locked(SolvableId),
     /// The target node is constrained by the specified version set
@@ -292,7 +292,8 @@ pub(crate) enum ConflictCause {
 /// - They all have the same name
 /// - They all have the same predecessor nodes
 /// - They all have the same successor nodes
-pub(crate) struct MergedConflictNode {
+pub struct MergedConflictNode {
+    /// The list of solvable ids that have been merged into this node.
     pub ids: Vec<SolvableId>,
 }
 
@@ -301,10 +302,14 @@ pub(crate) struct MergedConflictNode {
 /// The root of the graph is the "root solvable". Note that not all the
 /// solvable's requirements are included in the graph, only those that are
 /// directly or indirectly involved in the conflict.
+#[derive(Clone)]
 pub struct ConflictGraph {
-    graph: DiGraph<ConflictNode, ConflictEdge>,
-    root_node: NodeIndex,
-    unresolved_node: Option<NodeIndex>,
+    /// The conflict graph as a directed petgraph.
+    pub graph: DiGraph<ConflictNode, ConflictEdge>,
+    /// The single source node for root constraints introduced to the solver.
+    pub root_node: NodeIndex,
+    /// A single sink node that consumes all unresolvable constraints.
+    pub unresolved_node: Option<NodeIndex>,
 }
 
 impl ConflictGraph {
@@ -401,7 +406,10 @@ impl ConflictGraph {
 
     /// Simplifies and collapses nodes so that these can be considered the same
     /// candidate
-    fn simplify(&self, interner: &impl Interner) -> HashMap<SolvableId, Rc<MergedConflictNode>> {
+    pub fn simplify(
+        &self,
+        interner: &impl Interner,
+    ) -> HashMap<SolvableId, Rc<MergedConflictNode>> {
         let graph = &self.graph;
 
         // Gather information about nodes that can be merged

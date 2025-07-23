@@ -241,7 +241,7 @@ impl<I: Interner> Display for DisplaySolvableId<'_, I> {
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct SolvableOrRootId(u32);
+pub struct SolvableOrRootId(u32);
 
 impl SolvableOrRootId {
     pub fn root() -> Self {
