@@ -1,4 +1,20 @@
 # Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.10.1](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.0...resolvo-v0.10.1) - 2025-07-30
+
+### Other
+
+- strip whitespace if version set empty ([#164](https://github.com/prefix-dev/resolvo/pull/164))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.109 to 0.5.110 ([#161](https://github.com/prefix-dev/resolvo/pull/161))
+- *(ci)* bump prefix-dev/setup-pixi from 0.8.12 to 0.8.14 ([#160](https://github.com/prefix-dev/resolvo/pull/160))
+# Changelog
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
