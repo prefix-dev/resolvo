@@ -16,6 +16,7 @@ edition = "2024"
 readme = "README.md"
 keywords = ["dependency", "solver", "version"]
 categories = ["algorithms"]
+rust-version = "1.85.1"
 
 [package]
 name = "resolvo"
@@ -29,6 +30,7 @@ repository.workspace = true
 license.workspace = true
 edition.workspace = true
 readme.workspace = true
+rust-version.workspace = true
 
 [features]
 diagnostics = ["tabwriter", "human_bytes"]
