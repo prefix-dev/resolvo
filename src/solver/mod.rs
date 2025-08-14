@@ -1,4 +1,4 @@
-use std::{any::Any, fmt::Display, ops::ControlFlow};
+use std::{fmt::Display, ops::ControlFlow};
 
 use ahash::{HashMap, HashSet};
 pub use cache::SolverCache;
@@ -214,11 +214,15 @@ impl<D: DependencyProvider> Solver<D, NowOrNeverRuntime> {
 
 /// The root cause of a solver error.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum UnsolvableOrCancelled {
     /// The problem was unsolvable.
     Unsolvable(Conflict),
     /// The solving process was cancelled.
-    Cancelled(Box<dyn Any>),
+    Cancelled {
+        /// Human-readable reason for cancellation
+        reason: String,
+    },
 }
 
 impl From<Conflict> for UnsolvableOrCancelled {
@@ -227,9 +231,47 @@ impl From<Conflict> for UnsolvableOrCancelled {
     }
 }
 
-impl From<Box<dyn Any>> for UnsolvableOrCancelled {
-    fn from(value: Box<dyn Any>) -> Self {
-        UnsolvableOrCancelled::Cancelled(value)
+impl From<String> for UnsolvableOrCancelled {
+    fn from(reason: String) -> Self {
+        UnsolvableOrCancelled::Cancelled { reason }
+    }
+}
+
+impl UnsolvableOrCancelled {
+    /// Returns `true` if the error is an unsolvable conflict.
+    pub fn is_unsolvable(&self) -> bool {
+        matches!(self, UnsolvableOrCancelled::Unsolvable(_))
+    }
+
+    /// Returns `true` if the error is due to cancellation.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, UnsolvableOrCancelled::Cancelled { .. })
+    }
+
+    /// Returns a reference to the conflict if this is an unsolvable error.
+    pub fn as_unsolvable(&self) -> Option<&Conflict> {
+        match self {
+            UnsolvableOrCancelled::Unsolvable(conflict) => Some(conflict),
+            UnsolvableOrCancelled::Cancelled { .. } => None,
+        }
+    }
+
+    /// Serializes the error to JSON format.
+    #[cfg(feature = "json")]
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Serializes the error to pretty-printed JSON format.
+    #[cfg(feature = "json")]
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Deserializes an error from JSON format.
+    #[cfg(feature = "json")]
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
     }
 }
 
@@ -237,7 +279,7 @@ impl From<Box<dyn Any>> for UnsolvableOrCancelled {
 #[derive(Debug)]
 pub(crate) enum PropagationError {
     Conflict(VariableId, bool, ClauseId),
-    Cancelled(Box<dyn Any>),
+    Cancelled(String),
 }
 
 impl Display for PropagationError {
@@ -250,8 +292,8 @@ impl Display for PropagationError {
                     solvable, value, clause
                 )
             }
-            PropagationError::Cancelled(_) => {
-                write!(f, "propagation was cancelled")
+            PropagationError::Cancelled(reason) => {
+                write!(f, "propagation was cancelled: {}", reason)
             }
         }
     }
@@ -312,7 +354,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// unsolvable, it is simply not included in the solution.
     ///
     /// If the solution process is cancelled (see
-    /// [`DependencyProvider::should_cancel_with_value`]), returns an
+    /// [`DependencyProvider::should_cancel_with_reason`]), returns an
     /// [`UnsolvableOrCancelled::Cancelled`] containing the cancellation value.
     pub fn solve(
         &mut self,
@@ -390,7 +432,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// an `Err` on no solution.
     ///
     /// If the solution process is cancelled (see
-    /// [`DependencyProvider::should_cancel_with_value`]),
+    /// [`DependencyProvider::should_cancel_with_reason`]),
     /// returns [`UnsolvableOrCancelled::Cancelled`] as an `Err`.
     fn run_sat(
         &mut self,
@@ -488,9 +530,9 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                         continue;
                     }
                 }
-                Err(PropagationError::Cancelled(value)) => {
+                Err(PropagationError::Cancelled(reason)) => {
                     // Propagation was cancelled
-                    return Err(UnsolvableOrCancelled::Cancelled(value));
+                    return Err(UnsolvableOrCancelled::Cancelled { reason });
                 }
             }
 
@@ -656,9 +698,9 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     level = new_level;
                     tracing::debug!("╘══ Propagation completed");
                 }
-                Err(UnsolvableOrCancelled::Cancelled(value)) => {
+                Err(UnsolvableOrCancelled::Cancelled { reason }) => {
                     tracing::debug!("╘══ Propagation cancelled");
-                    return Err(UnsolvableOrCancelled::Cancelled(value));
+                    return Err(UnsolvableOrCancelled::Cancelled { reason });
                 }
                 Err(UnsolvableOrCancelled::Unsolvable(conflict)) => {
                     tracing::debug!("╘══ Propagation resulted in a conflict");
@@ -936,8 +978,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 Ok(()) => {
                     return Ok(level);
                 }
-                Err(PropagationError::Cancelled(value)) => {
-                    return Err(UnsolvableOrCancelled::Cancelled(value));
+                Err(PropagationError::Cancelled(reason)) => {
+                    return Err(UnsolvableOrCancelled::Cancelled { reason });
                 }
                 Err(PropagationError::Conflict(
                     conflicting_solvable,
@@ -1048,8 +1090,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// solvable has become false, in which case it picks a new solvable to
     /// watch (if available) or triggers an assignment.
     fn propagate(&mut self, level: u32) -> Result<(), PropagationError> {
-        if let Some(value) = self.provider().should_cancel_with_value() {
-            return Err(PropagationError::Cancelled(value));
+        if let Some(reason) = self.provider().should_cancel_with_reason() {
+            return Err(PropagationError::Cancelled(reason));
         };
 
         // Add decisions from assertions and learned clauses. If any of these cause a
@@ -1465,6 +1507,93 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         for activity in &mut self.state.name_activity {
             *activity *= self.activity_decay;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::conflict::Conflict;
+
+    #[test]
+    #[cfg(feature = "json")]
+    fn test_unsolvable_json_serialization() {
+        let mut conflict = Conflict::default();
+        conflict.add_clause(ClauseId::install_root());
+
+        let error = UnsolvableOrCancelled::Unsolvable(conflict);
+        let json = error.to_json().expect("Should serialize to JSON");
+        assert!(json.contains("Unsolvable"));
+        assert!(json.contains("clauses"));
+
+        let pretty_json = error
+            .to_json_pretty()
+            .expect("Should serialize to pretty JSON");
+        assert!(pretty_json.contains("Unsolvable"));
+        assert!(pretty_json.contains("  "));
+
+        let deserialized =
+            UnsolvableOrCancelled::from_json(&json).expect("Should deserialize from JSON");
+
+        assert!(deserialized.is_unsolvable());
+        assert!(!deserialized.is_cancelled());
+
+        if let Some(deserialized_conflict) = deserialized.as_unsolvable() {
+            assert_eq!(deserialized_conflict.clause_count(), 1);
+        }
+    }
+
+    #[test]
+    fn test_error_introspection() {
+        let conflict = Conflict::default();
+        let unsolvable_error = UnsolvableOrCancelled::Unsolvable(conflict);
+        let cancelled_error = UnsolvableOrCancelled::Cancelled {
+            reason: "test".to_string(),
+        };
+
+        assert!(unsolvable_error.is_unsolvable());
+        assert!(!unsolvable_error.is_cancelled());
+        assert!(unsolvable_error.as_unsolvable().is_some());
+
+        assert!(!cancelled_error.is_unsolvable());
+        assert!(cancelled_error.is_cancelled());
+        assert!(cancelled_error.as_unsolvable().is_none());
+    }
+
+    #[test]
+    fn test_conflict_clause_count() {
+        let mut conflict = Conflict::default();
+        assert_eq!(conflict.clause_count(), 0);
+
+        conflict.add_clause(ClauseId::install_root());
+        assert_eq!(conflict.clause_count(), 1);
+
+        conflict.add_clause(ClauseId::install_root());
+        assert_eq!(conflict.clause_count(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "json")]
+    fn test_cancelled_error_serialization() {
+        let cancelled_error = UnsolvableOrCancelled::Cancelled {
+            reason: "test cancellation".to_string(),
+        };
+        let result = cancelled_error
+            .to_json()
+            .expect("Should serialize successfully");
+        assert!(result.contains("Cancelled"));
+        assert!(result.contains("test cancellation"));
+
+        let deserialized = UnsolvableOrCancelled::from_json(&result).expect("Should deserialize");
+        assert!(deserialized.is_cancelled());
+        assert!(!deserialized.is_unsolvable());
+
+        let pretty_result = cancelled_error
+            .to_json_pretty()
+            .expect("Should serialize pretty");
+        assert!(pretty_result.contains("Cancelled"));
+        assert!(pretty_result.contains("test cancellation"));
+        assert!(pretty_result.contains("  "));
     }
 }
 

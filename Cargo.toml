@@ -34,6 +34,7 @@ rust-version.workspace = true
 
 [features]
 diagnostics = ["tabwriter", "human_bytes"]
+json = ["serde", "serde_json", "petgraph/serde-1"]
 
 [dependencies]
 ahash = "0.8.12"
@@ -43,6 +44,7 @@ tracing = "0.1.41"
 elsa = "1.11.2"
 bitvec = "1.0.1"
 serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0.142", optional = true }
 futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
 event-listener = "5.4"
 indexmap = "2"

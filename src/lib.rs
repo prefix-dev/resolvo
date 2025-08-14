@@ -19,10 +19,7 @@ pub mod snapshot;
 mod solver;
 pub mod utils;
 
-use std::{
-    any::Any,
-    fmt::{Debug, Display},
-};
+use std::fmt::{Debug, Display};
 
 pub use conditional_requirement::{Condition, ConditionalRequirement, LogicalOperator};
 pub use internal::{
@@ -144,7 +141,7 @@ pub trait DependencyProvider: Sized + Interner {
     /// [Self::get_dependencies] and [Self::get_candidates]). If it returns
     /// `Some(...)`, the solver will stop and return
     /// [UnsolvableOrCancelled::Cancelled].
-    fn should_cancel_with_value(&self) -> Option<Box<dyn Any>> {
+    fn should_cancel_with_reason(&self) -> Option<String> {
         None
     }
 }

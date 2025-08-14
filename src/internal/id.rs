@@ -128,6 +128,8 @@ impl From<SolvableId> for u32 {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub(crate) struct ClauseId(NonZeroU32);
 
 impl ClauseId {
@@ -241,6 +243,8 @@ impl<I: Interner> Display for DisplaySolvableId<'_, I> {
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct SolvableOrRootId(u32);
 
 impl SolvableOrRootId {

@@ -1,4 +1,4 @@
-use std::{any::Any, cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use ahash::HashMap;
 use bitvec::vec::BitVec;
@@ -79,7 +79,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_candidates(
         &self,
         package_name: NameId,
-    ) -> Result<&Candidates, Box<dyn Any>> {
+    ) -> Result<&Candidates, String> {
         // If we already have the candidates for this package cached we can simply
         // return
         let candidates_id = match self.package_name_to_candidates.get_copy(&package_name) {
@@ -88,8 +88,8 @@ impl<D: DependencyProvider> SolverCache<D> {
                 // Since getting the candidates from the provider is a potentially blocking
                 // operation, we want to check beforehand whether we should cancel the solving
                 // process
-                if let Some(value) = self.provider.should_cancel_with_value() {
-                    return Err(value);
+                if let Some(reason) = self.provider.should_cancel_with_reason() {
+                    return Err(reason);
                 }
 
                 // Check if there is an in-flight request
@@ -172,7 +172,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_matching_candidates(
         &self,
         version_set_id: VersionSetId,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[SolvableId], String> {
         match self.version_set_candidates.get(&version_set_id) {
             Some(candidates) => Ok(candidates),
             None => {
@@ -210,7 +210,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_non_matching_candidates(
         &self,
         version_set_id: VersionSetId,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[SolvableId], String> {
         match self.version_set_inverse_candidates.get(&version_set_id) {
             Some(candidates) => Ok(candidates),
             None => {
@@ -255,7 +255,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_sorted_candidates(
         &self,
         requirement: Requirement,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[SolvableId], String> {
         match requirement {
             Requirement::Single(version_set_id) => {
                 self.get_or_cache_sorted_candidates_for_version_set(version_set_id)
@@ -294,7 +294,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub(crate) async fn get_or_cache_sorted_candidates_for_version_set(
         &self,
         version_set_id: VersionSetId,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[SolvableId], String> {
         let requirement = version_set_id.into();
         if let Some(candidates) = self.requirement_to_sorted_candidates.get(&requirement) {
             return Ok(candidates);
@@ -340,15 +340,15 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_dependencies(
         &self,
         solvable_id: SolvableId,
-    ) -> Result<&Dependencies, Box<dyn Any>> {
+    ) -> Result<&Dependencies, String> {
         let dependencies_id = match self.solvable_to_dependencies.get_copy(&solvable_id) {
             Some(id) => id,
             None => {
                 // Since getting the dependencies from the provider is a potentially blocking
                 // operation, we want to check beforehand whether we should cancel the solving
                 // process
-                if let Some(value) = self.provider.should_cancel_with_value() {
-                    return Err(value);
+                if let Some(reason) = self.provider.should_cancel_with_reason() {
+                    return Err(reason);
                 }
 
                 let dependencies = self.provider.get_dependencies(solvable_id).await;

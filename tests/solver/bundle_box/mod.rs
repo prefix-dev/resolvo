@@ -21,7 +21,6 @@ pub mod parser;
 mod spec;
 
 use std::{
-    any::Any,
     cell::{Cell, RefCell},
     collections::HashSet,
     fmt::Display,
@@ -421,9 +420,9 @@ impl DependencyProvider for BundleBoxProvider {
         self.maybe_delay(Dependencies::Known(result)).await
     }
 
-    fn should_cancel_with_value(&self) -> Option<Box<dyn Any>> {
+    fn should_cancel_with_reason(&self) -> Option<String> {
         if self.cancel_solving.get() {
-            Some(Box::new("cancelled!".to_string()))
+            Some("cancelled!".to_string())
         } else {
             None
         }

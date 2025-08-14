@@ -11,6 +11,9 @@ use petgraph::{
     visit::{Bfs, DfsPostOrder, EdgeRef},
 };
 
+#[cfg(feature = "json")]
+use petgraph::visit::IntoNodeReferences;
+
 use crate::{
     DependencyProvider, Interner, Requirement,
     internal::{
@@ -23,6 +26,7 @@ use crate::{
 
 /// Represents the cause of the solver being unable to find a solution
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Conflict {
     /// The clauses involved in an unsatisfiable conflict
     clauses: Vec<ClauseId>,
@@ -214,10 +218,29 @@ impl Conflict {
         let graph = self.graph(solver);
         DisplayUnsat::new(graph, solver.provider())
     }
+
+    /// Returns the number of clauses involved in this conflict.
+    pub fn clause_count(&self) -> usize {
+        self.clauses.len()
+    }
+
+    /// Serialize the full conflict graph structure to JSON.
+    /// This includes the complete petgraph structure with nodes and edges plus embedded display information.
+    #[cfg(feature = "json")]
+    pub fn to_graph_json<D: DependencyProvider, RT: AsyncRuntime>(
+        &self,
+        solver: &Solver<D, RT>,
+    ) -> Result<String, serde_json::Error> {
+        let graph = self.graph(solver);
+        let enhanced_graph = DisplayEnhancedConflictGraph::from_graph(graph, solver);
+
+        serde_json::to_string_pretty(&enhanced_graph)
+    }
 }
 
 /// A node in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConflictNode {
     /// Node corresponding to a solvable
     Solvable(SolvableOrRootId),
@@ -243,10 +266,40 @@ impl ConflictNode {
     fn solvable(self) -> Option<SolvableId> {
         self.solvable_or_root().solvable()
     }
+
+    /// Returns a type-safe display name for this conflict node
+    pub fn display_name<D: DependencyProvider, RT: AsyncRuntime>(
+        self,
+        solver: &Solver<D, RT>,
+    ) -> String {
+        match self {
+            ConflictNode::Solvable(solvable_id) => {
+                if solvable_id.is_root() {
+                    "<root>".to_string()
+                } else if let Some(solvable) = solvable_id.solvable() {
+                    solver
+                        .cache
+                        .provider()
+                        .display_solvable(solvable)
+                        .to_string()
+                } else {
+                    "unknown solvable".to_string()
+                }
+            }
+            ConflictNode::UnresolvedDependency => "unresolved dependency".to_string(),
+            ConflictNode::Excluded(string_id) => {
+                format!(
+                    "excluded: {}",
+                    solver.cache.provider().display_string(string_id)
+                )
+            }
+        }
+    }
 }
 
 /// An edge in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConflictEdge {
     /// The target node is a candidate for the dependency specified by the
     /// [`Requirement`]
@@ -269,10 +322,22 @@ impl ConflictEdge {
             ConflictEdge::Conflict(_) => panic!("expected requires edge, found conflict"),
         }
     }
+
+    /// Returns a type-safe display name for this conflict edge
+    #[cfg(feature = "json")]
+    fn display_name<D: DependencyProvider>(self, provider: &D) -> String {
+        match self {
+            ConflictEdge::Requires(requirement) => {
+                format!("requires: {}", requirement.display(provider))
+            }
+            ConflictEdge::Conflict(cause) => cause.display_name(provider),
+        }
+    }
 }
 
 /// Conflict causes
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConflictCause {
     /// The solvable is locked
     Locked(SolvableId),
@@ -282,6 +347,99 @@ pub enum ConflictCause {
     ForbidMultipleInstances,
     /// The node was excluded
     Excluded,
+}
+
+impl ConflictCause {
+    /// Returns a type-safe display name for this conflict cause
+    #[cfg(feature = "json")]
+    fn display_name<D: DependencyProvider>(self, provider: &D) -> String {
+        match self {
+            ConflictCause::Locked(solvable_id) => {
+                format!("locked: {}", provider.display_solvable(solvable_id))
+            }
+            ConflictCause::Constrains(version_set_id) => {
+                format!(
+                    "constrains: {}",
+                    provider.display_version_set(version_set_id)
+                )
+            }
+            ConflictCause::ForbidMultipleInstances => "multiple instances forbidden".to_string(),
+            ConflictCause::Excluded => "excluded".to_string(),
+        }
+    }
+}
+
+/// Display-enhanced versions of the conflict structures for JSON serialization
+#[cfg(feature = "json")]
+#[derive(serde::Serialize)]
+pub struct DisplayEnhancedConflictGraph {
+    /// The conflict graph as a directed petgraph with display-enhanced nodes and edges
+    pub graph: DiGraph<DisplayEnhancedConflictNode, DisplayEnhancedConflictEdge>,
+    /// The single source node for root constraints introduced to the solver
+    pub root_node: NodeIndex,
+    /// A single sink node that consumes all unresolvable constraints
+    pub unresolved_node: Option<NodeIndex>,
+}
+
+#[cfg(feature = "json")]
+impl DisplayEnhancedConflictGraph {
+    /// Creates a display-enhanced conflict graph from a regular conflict graph
+    pub fn from_graph<D: DependencyProvider, RT: AsyncRuntime>(
+        graph: ConflictGraph,
+        solver: &Solver<D, RT>,
+    ) -> Self {
+        let mut enhanced_graph = DiGraph::new();
+        let mut node_mapping = std::collections::HashMap::new();
+
+        // Copy nodes with display information
+        for (node_idx, node) in graph.graph.node_references() {
+            let enhanced_node = DisplayEnhancedConflictNode {
+                data: *node,
+                display: node.display_name(solver),
+            };
+            let new_idx = enhanced_graph.add_node(enhanced_node);
+            node_mapping.insert(node_idx, new_idx);
+        }
+
+        // Copy edges with display information
+        for edge_ref in graph.graph.edge_references() {
+            let source = node_mapping[&edge_ref.source()];
+            let target = node_mapping[&edge_ref.target()];
+            let enhanced_edge = DisplayEnhancedConflictEdge {
+                data: *edge_ref.weight(),
+                display: edge_ref.weight().display_name(solver.cache.provider()),
+            };
+            enhanced_graph.add_edge(source, target, enhanced_edge);
+        }
+
+        Self {
+            graph: enhanced_graph,
+            root_node: node_mapping[&graph.root_node],
+            unresolved_node: graph.unresolved_node.map(|idx| node_mapping[&idx]),
+        }
+    }
+}
+
+/// A conflict node enhanced with human-readable display information for JSON serialization
+#[cfg(feature = "json")]
+#[derive(serde::Serialize)]
+pub struct DisplayEnhancedConflictNode {
+    /// The original conflict node data
+    #[serde(flatten)]
+    pub data: ConflictNode,
+    /// Human-readable display name
+    pub display: String,
+}
+
+/// A conflict edge enhanced with human-readable display information for JSON serialization
+#[cfg(feature = "json")]
+#[derive(serde::Serialize)]
+pub struct DisplayEnhancedConflictEdge {
+    /// The original conflict edge data
+    #[serde(flatten)]
+    pub data: ConflictEdge,
+    /// Human-readable display name
+    pub display: String,
 }
 
 /// Represents a node that has been merged with others
@@ -303,6 +461,7 @@ pub struct MergedConflictNode {
 /// solvable's requirements are included in the graph, only those that are
 /// directly or indirectly involved in the conflict.
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConflictGraph {
     /// The conflict graph as a directed petgraph.
     pub graph: DiGraph<ConflictNode, ConflictEdge>,

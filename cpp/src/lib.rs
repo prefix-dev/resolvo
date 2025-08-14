@@ -674,7 +674,7 @@ pub extern "C" fn resolvo_solve(
             *error = problem.display_user_friendly(&solver).to_string().into();
             false
         }
-        Err(resolvo::UnsolvableOrCancelled::Cancelled(cancelled)) => {
+        Err(resolvo::UnsolvableOrCancelled::Cancelled { reason: _ }) => {
             *error = String::from("cancelled");
             false
         }

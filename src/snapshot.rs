@@ -9,7 +9,7 @@
 //! The [`DependencySnapshot`] implements the [`DependencyProvider`] trait,
 //! allowing it to be used as a dependency provider for the solver.
 
-use std::{any::Any, collections::VecDeque, fmt::Display, time::SystemTime};
+use std::{collections::VecDeque, fmt::Display, time::SystemTime};
 
 use ahash::HashSet;
 use futures::FutureExt;
@@ -137,7 +137,7 @@ impl DependencySnapshot {
         names: impl IntoIterator<Item = NameId>,
         version_sets: impl IntoIterator<Item = VersionSetId>,
         solvables: impl IntoIterator<Item = SolvableId>,
-    ) -> Result<Self, Box<dyn Any>> {
+    ) -> Result<Self, String> {
         Self::from_provider_async(provider, names, version_sets, solvables)
             .now_or_never()
             .expect(
@@ -154,7 +154,7 @@ impl DependencySnapshot {
         names: impl IntoIterator<Item = NameId>,
         version_sets: impl IntoIterator<Item = VersionSetId>,
         solvables: impl IntoIterator<Item = SolvableId>,
-    ) -> Result<Self, Box<dyn Any>> {
+    ) -> Result<Self, String> {
         #[derive(Hash, Copy, Clone, Debug, Eq, PartialEq)]
         pub enum Element {
             Solvable(SolvableId),
@@ -540,10 +540,10 @@ impl DependencyProvider for SnapshotProvider<'_> {
         self.solvable(solvable).dependencies.clone()
     }
 
-    fn should_cancel_with_value(&self) -> Option<Box<dyn Any>> {
+    fn should_cancel_with_reason(&self) -> Option<String> {
         if let Some(stop_time) = &self.stop_time {
             if SystemTime::now() > *stop_time {
-                return Some(Box::new(()));
+                return Some("Snapshot operation timed out".to_string());
             }
         }
         None

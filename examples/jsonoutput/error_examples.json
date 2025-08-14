@@ -1,0 +1,63 @@
+{
+  "description": "Examples of JSON-serialized error formats from resolvo dependency solver",
+  "examples": {
+    "cancelled_error": {
+      "Cancelled": {
+        "reason": "User requested cancellation during package resolution"
+      }
+    },
+    "memory_error": {
+      "Cancelled": {
+        "reason": "Insufficient memory to continue"
+      }
+    },
+    "network_error": {
+      "Cancelled": {
+        "reason": "Network connection lost"
+      }
+    },
+    "timeout_error": {
+      "Cancelled": {
+        "reason": "Operation timed out after 30 seconds"
+      }
+    },
+    "unsolvable_compact": {
+      "Unsolvable": {
+        "clauses": [
+          2
+        ]
+      }
+    },
+    "unsolvable_graph": {
+      "graph": {
+        "edge_property": "directed",
+        "edges": [
+          [
+            0,
+            1,
+            {
+              "Requires": {
+                "single": 1
+              },
+              "display": "requires: example-package >=1.0.0"
+            }
+          ]
+        ],
+        "node_holes": [],
+        "nodes": [
+          {
+            "Solvable": 0,
+            "display": "<root>"
+          },
+          {
+            "UnresolvedDependency": null,
+            "display": "unresolved dependency"
+          }
+        ]
+      },
+      "root_node": 0,
+      "unresolved_node": 1
+    }
+  },
+  "title": "Resolvo Machine-Readable Error Examples"
+}

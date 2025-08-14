@@ -1,4 +1,4 @@
-use std::{any::Any, future::ready};
+use std::future::ready;
 
 use futures::{
     FutureExt, StreamExt, TryFutureExt, future::LocalBoxFuture, stream::FuturesUnordered,
@@ -36,8 +36,7 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     root_dependencies: &'cache Dependencies,
 
     /// The set of futures that are pending to be resolved.
-    pending_futures:
-        FuturesUnordered<LocalBoxFuture<'cache, Result<TaskResult<'cache>, Box<dyn Any>>>>,
+    pending_futures: FuturesUnordered<LocalBoxFuture<'cache, Result<TaskResult<'cache>, String>>>,
 
     /// A list of clauses that were introduced that are conflicting with the
     /// current state.
@@ -114,7 +113,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     pub async fn encode(
         mut self,
         solvable_ids: impl IntoIterator<Item = SolvableOrRootId>,
-    ) -> Result<Vec<ClauseId>, Box<dyn Any>> {
+    ) -> Result<Vec<ClauseId>, String> {
         // Queue the initial solvables for processing.
         for solvable_id in solvable_ids {
             self.queue_solvable(solvable_id);

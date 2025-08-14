@@ -47,7 +47,7 @@ fn solve_unsat(mut provider: BundleBoxProvider, specs: &[&str]) -> String {
             // Format a user friendly error message
             conflict.display_user_friendly(&solver).to_string()
         }
-        Err(UnsolvableOrCancelled::Cancelled(reason)) => *reason.downcast().unwrap(),
+        Err(UnsolvableOrCancelled::Cancelled { reason }) => reason,
     }
 }
 
@@ -80,7 +80,7 @@ fn solve_snapshot(mut provider: BundleBoxProvider, specs: &[&str]) -> String {
             // Format a user friendly error message
             conflict.display_user_friendly(&solver).to_string()
         }
-        Err(UnsolvableOrCancelled::Cancelled(reason)) => *reason.downcast().unwrap(),
+        Err(UnsolvableOrCancelled::Cancelled { reason }) => reason,
     }
 }
 
@@ -1066,6 +1066,6 @@ fn solve_for_snapshot<D: DependencyProvider>(
             // Format a user friendly error message
             conflict.display_user_friendly(&solver).to_string()
         }
-        Err(UnsolvableOrCancelled::Cancelled(reason)) => *reason.downcast().unwrap(),
+        Err(UnsolvableOrCancelled::Cancelled { reason }) => reason,
     }
 }
