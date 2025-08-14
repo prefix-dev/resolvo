@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.1...resolvo-v0.10.2) - 2025-08-14
+
+### Added
+
+- update rust to 1.89.0 toolchain and add 1.85.1 msrv ([#167](https://github.com/prefix-dev/resolvo/pull/167))
+
+### Other
+
+- *(ci)* bump actions/checkout from 4.2.2 to 5.0.0 ([#165](https://github.com/prefix-dev/resolvo/pull/165))
+
 ## [0.10.1](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.0...resolvo-v0.10.1) - 2025-07-30
 
 ### Other
