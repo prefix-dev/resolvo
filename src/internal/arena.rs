@@ -117,10 +117,10 @@ impl<TId: ArenaId, TValue> Arena<TId, TValue> {
         unsafe {
             let chunks = self.chunks.get();
             (
-                (*chunks)
+                (&mut (*chunks))
                     .get_unchecked_mut(a_chunk)
                     .get_unchecked_mut(a_offset),
-                (*chunks)
+                (&mut (*chunks))
                     .get_unchecked_mut(b_chunk)
                     .get_unchecked_mut(b_offset),
             )
@@ -137,7 +137,7 @@ impl<TId: ArenaId, TValue> Index<TId> for Arena<TId, TValue> {
         let (chunk, offset) = Self::chunk_and_offset(index);
         unsafe {
             let vec = self.chunks.get();
-            (*vec).get_unchecked(chunk).get_unchecked(offset)
+            (&(*vec)).get_unchecked(chunk).get_unchecked(offset)
         }
     }
 }
@@ -179,7 +179,7 @@ impl<'a, TId: ArenaId, TValue> Iterator for ArenaIter<'a, TId, TValue> {
                 let vec = self.arena.chunks.get();
                 Some((
                     TId::from_usize(self.index),
-                    (*vec).get_unchecked(chunk).get_unchecked(offset),
+                    (&(*vec)).get_unchecked(chunk).get_unchecked(offset),
                 ))
             };
 
@@ -207,7 +207,9 @@ impl<'a, TId: ArenaId, TValue> Iterator for ArenaIterMut<'a, TId, TValue> {
                 let vec = self.arena.chunks.get();
                 Some((
                     TId::from_usize(self.index),
-                    (*vec).get_unchecked_mut(chunk).get_unchecked_mut(offset),
+                    (&mut (*vec))
+                        .get_unchecked_mut(chunk)
+                        .get_unchecked_mut(offset),
                 ))
             };
             self.index += 1;

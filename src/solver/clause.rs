@@ -325,7 +325,7 @@ impl Clause {
         disjunction_to_candidates: &Arena<DisjunctionId, Disjunction>,
         mut visit: impl FnMut(Literal),
     ) {
-        self.try_fold_literals(
+        let _ = self.try_fold_literals(
             learnt_clauses,
             requirements_to_sorted_candidates,
             disjunction_to_candidates,
