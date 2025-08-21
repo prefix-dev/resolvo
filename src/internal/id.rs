@@ -4,11 +4,13 @@ use std::{
 };
 
 use crate::{Interner, internal::arena::ArenaId};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// The id associated to a package name
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct NameId(pub u32);
 
@@ -25,7 +27,7 @@ impl ArenaId for NameId {
 /// The id associated with a generic string
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct StringId(pub u32);
 
@@ -42,7 +44,7 @@ impl ArenaId for StringId {
 /// The id associated with a VersionSet.
 #[repr(transparent)]
 #[derive(Clone, Default, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct VersionSetId(pub u32);
 
@@ -59,7 +61,7 @@ impl ArenaId for VersionSetId {
 /// The id associated with a Condition.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct ConditionId(NonZero<u32>);
 
@@ -89,7 +91,7 @@ impl ArenaId for ConditionId {
 /// The id associated with a union (logical OR) of two or more version sets.
 #[repr(transparent)]
 #[derive(Clone, Default, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct VersionSetUnionId(pub u32);
 
@@ -106,7 +108,7 @@ impl ArenaId for VersionSetUnionId {
 /// The id associated to a solvable
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct SolvableId(pub u32);
 
@@ -128,6 +130,8 @@ impl From<SolvableId> for u32 {
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub(crate) struct ClauseId(NonZeroU32);
 
 impl ClauseId {
@@ -241,6 +245,8 @@ impl<I: Interner> Display for DisplaySolvableId<'_, I> {
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct SolvableOrRootId(u32);
 
 impl SolvableOrRootId {
