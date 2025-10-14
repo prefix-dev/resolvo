@@ -1069,3 +1069,120 @@ fn solve_for_snapshot<D: DependencyProvider>(
         Err(UnsolvableOrCancelled::Cancelled(reason)) => *reason.downcast().unwrap(),
     }
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_conflict_serialization_json() {
+    let mut provider = BundleBoxProvider::from_packages(&[
+        ("a", 1, vec!["b"]),
+        ("b", 1, vec!["c 2"]),
+        ("c", 1, vec![]),
+    ]);
+
+    let requirements = provider.requirements(&["a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+
+    let Err(UnsolvableOrCancelled::Unsolvable(conflict)) = solver.solve(problem) else {
+        panic!("Expected an unsolvable conflict");
+    };
+
+    let json = serde_json::to_string(&conflict).expect("Failed to serialize conflict to JSON");
+    let _deserialized_conflict: resolvo::conflict::Conflict =
+        serde_json::from_str(&json).expect("Failed to deserialize conflict from JSON");
+    let graph = conflict.graph(&solver);
+    let _graph_json =
+        serde_json::to_string(&graph).expect("Failed to serialize ConflictGraph to JSON");
+    let unsolvable = UnsolvableOrCancelled::Unsolvable(conflict);
+    let _unsolvable_json =
+        serde_json::to_string(&unsolvable).expect("Failed to serialize UnsolvableOrCancelled");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("Invalid JSON");
+    assert!(
+        parsed.get("clauses").is_some(),
+        "Conflict should have clauses field"
+    );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_multiple_error_scenarios() {
+    let mut provider = BundleBoxProvider::from_packages(&[("foo", 1, vec!["nonexistent"])]);
+
+    let requirements = provider.requirements(&["foo"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+
+    let Err(UnsolvableOrCancelled::Unsolvable(conflict)) = solver.solve(problem) else {
+        panic!("Expected unsolvable conflict in scenario 1");
+    };
+
+    let json = serde_json::to_string(&conflict).expect("Scenario 1: JSON serialization failed");
+    let _: resolvo::conflict::Conflict =
+        serde_json::from_str(&json).expect("Scenario 1: JSON deserialization failed");
+
+    let mut provider = BundleBoxProvider::from_packages(&[("x", 1, vec!["y 2"]), ("y", 1, vec![])]);
+
+    let requirements = provider.requirements(&["x"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+
+    let Err(UnsolvableOrCancelled::Unsolvable(conflict)) = solver.solve(problem) else {
+        panic!("Expected unsolvable conflict in scenario 2");
+    };
+
+    let json = serde_json::to_string(&conflict).expect("Scenario 2: JSON serialization failed");
+    let _: resolvo::conflict::Conflict =
+        serde_json::from_str(&json).expect("Scenario 2: JSON deserialization failed");
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_serialization_formats() {
+    let mut provider = BundleBoxProvider::from_packages(&[("test", 1, vec!["missing"])]);
+
+    let requirements = provider.requirements(&["test"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+
+    let Err(UnsolvableOrCancelled::Unsolvable(conflict)) = solver.solve(problem) else {
+        panic!("Expected unsolvable conflict");
+    };
+
+    let json = serde_json::to_string(&conflict).expect("JSON serialization failed");
+    let _: resolvo::conflict::Conflict =
+        serde_json::from_str(&json).expect("JSON deserialization failed");
+    let pretty_json =
+        serde_json::to_string_pretty(&conflict).expect("Pretty JSON serialization failed");
+    let _: resolvo::conflict::Conflict =
+        serde_json::from_str(&pretty_json).expect("Pretty JSON deserialization failed");
+    let value: serde_json::Value =
+        serde_json::to_value(&conflict).expect("Value conversion failed");
+    let _: resolvo::conflict::Conflict =
+        serde_json::from_value(value).expect("Value deserialization failed");
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_unsolvable_or_cancelled_enum_structure() {
+    let mut provider = BundleBoxProvider::from_packages(&[("test", 1, vec!["missing"])]);
+
+    let requirements = provider.requirements(&["test"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+
+    let Err(UnsolvableOrCancelled::Unsolvable(conflict)) = solver.solve(problem) else {
+        panic!("Expected unsolvable conflict");
+    };
+
+    let unsolvable = UnsolvableOrCancelled::Unsolvable(conflict);
+    let json = serde_json::to_string(&unsolvable).expect("Serialization failed");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("Invalid JSON");
+    assert!(
+        parsed.get("Unsolvable").is_some(),
+        "Should contain Unsolvable variant"
+    );
+    assert!(
+        parsed.get("Cancelled").is_none(),
+        "Should not contain Cancelled variant when serializing Unsolvable"
+    );
+}
