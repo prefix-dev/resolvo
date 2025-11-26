@@ -8,7 +8,7 @@ use decision::Decision;
 use decision_tracker::DecisionTracker;
 use elsa::FrozenMap;
 use encoding::Encoder;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use variable_map::VariableMap;
 use watch_map::WatchMap;
@@ -196,6 +196,11 @@ pub(crate) struct SolverState {
 
     /// Activity score per package.
     name_activity: Vec<f32>,
+
+    /// Variables that are assigned true and have requires clauses.
+    /// Used to speed up `decide()` by only iterating over relevant variables.
+    /// May contain stale entries which are cleaned up lazily during `decide()`.
+    active_requires_parents: IndexSet<VariableId, ahash::RandomState>,
 }
 
 impl<D: DependencyProvider> Solver<D, NowOrNeverRuntime> {
@@ -429,19 +434,23 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     "╤══ Install {} at level {level}",
                     root_solvable.display(self.provider())
                 );
+                let root_variable = self
+                    .state
+                    .variable_map
+                    .intern_solvable_or_root(root_solvable);
                 self.state
                     .decision_tracker
                     .try_add_decision(
-                        Decision::new(
-                            self.state
-                                .variable_map
-                                .intern_solvable_or_root(root_solvable),
-                            true,
-                            ClauseId::install_root(),
-                        ),
+                        Decision::new(root_variable, true, ClauseId::install_root()),
                         level,
                     )
                     .expect("already decided");
+                track_decision_for_requires(
+                    root_variable,
+                    true,
+                    &self.state.requires_clauses,
+                    &mut self.state.active_requires_parents,
+                );
 
                 // Add the clauses for the root solvable.
                 let conflicting_clauses = self.async_runtime.block_on(
@@ -607,19 +616,23 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             ))
         } else {
             self.state.decision_tracker.undo_until(starting_level);
+            let variable = self
+                .state
+                .variable_map
+                .intern_solvable_or_root(solvable_or_root);
             self.state
                 .decision_tracker
                 .try_add_decision(
-                    Decision::new(
-                        self.state
-                            .variable_map
-                            .intern_solvable_or_root(solvable_or_root),
-                        false,
-                        ClauseId::install_root(),
-                    ),
+                    Decision::new(variable, false, ClauseId::install_root()),
                     starting_level + 1,
                 )
                 .expect("bug: already decided - decision should have been undone");
+            track_decision_for_requires(
+                variable,
+                false,
+                &self.state.requires_clauses,
+                &mut self.state.active_requires_parents,
+            );
             Ok(false)
         }
     }
@@ -710,20 +723,33 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         }
 
         let mut best_decision: Option<PossibleDecision> = None;
-        for (&solvable_id, requirements) in self.state.requires_clauses.iter() {
+
+        // Use index-based iteration to allow in-place removal of stale entries
+        let mut i = 0;
+        while i < self.state.active_requires_parents.len() {
+            let solvable_id = *self.state.active_requires_parents.get_index(i).unwrap();
+
+            // Lazy cleanup: if no longer assigned true, remove in-place and skip
+            if self.state.decision_tracker.assigned_value(solvable_id) != Some(true) {
+                self.state.active_requires_parents.swap_remove_index(i);
+                continue; // Don't increment, check swapped-in element
+            }
+
             let is_explicit_requirement = solvable_id == VariableId::root();
             if let Some(best_decision) = &best_decision {
                 // If we already have an explicit requirement, there is no need to evaluate
                 // non-explicit requirements.
                 if best_decision.is_explicit_requirement && !is_explicit_requirement {
+                    i += 1;
                     continue;
                 }
             }
 
-            // Consider only clauses in which we have decided to install the solvable
-            if self.state.decision_tracker.assigned_value(solvable_id) != Some(true) {
-                continue;
-            }
+            let Some(requirements) = self.state.requires_clauses.get(&solvable_id) else {
+                // No requirements for this variable (shouldn't happen but handle gracefully)
+                self.state.active_requires_parents.swap_remove_index(i);
+                continue; // Don't increment, check swapped-in element
+            };
 
             for (deps, condition, clause_id) in requirements.iter() {
                 let mut candidate = ControlFlow::Break(());
@@ -871,6 +897,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     }
                 }
             }
+
+            i += 1;
         }
 
         if let Some(PossibleDecision {
@@ -926,6 +954,12 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             .decision_tracker
             .try_add_decision(Decision::new(solvable, true, clause_id), level)
             .expect("bug: solvable was already decided!");
+        track_decision_for_requires(
+            solvable,
+            true,
+            &self.state.requires_clauses,
+            &mut self.state.active_requires_parents,
+        );
 
         self.propagate_and_learn(level)
     }
@@ -1018,19 +1052,24 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
 
         // Optimization: propagate right now, since we know that the clause is a unit
         // clause
-        let decision = literal.satisfying_value();
+        let decision_value = literal.satisfying_value();
+        let decision_variable = literal.variable();
         self.state
             .decision_tracker
             .try_add_decision(
-                Decision::new(literal.variable(), decision, learned_clause_id),
+                Decision::new(decision_variable, decision_value, learned_clause_id),
                 level,
             )
             .expect("bug: solvable was already decided!");
+        track_decision_for_requires(
+            decision_variable,
+            decision_value,
+            &self.state.requires_clauses,
+            &mut self.state.active_requires_parents,
+        );
         tracing::trace!(
-            "│├ Propagate after learn: {} = {decision}",
-            literal
-                .variable()
-                .display(&self.state.variable_map, self.provider()),
+            "│├ Propagate after learn: {} = {decision_value}",
+            decision_variable.display(&self.state.variable_map, self.provider()),
         );
 
         tracing::debug!("│└ Backtracked from {old_level} -> {level}");
@@ -1132,6 +1171,12 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                         })?;
 
                     if decided {
+                        track_decision_for_requires(
+                            other_watched_literal.variable(),
+                            other_watched_literal.satisfying_value(),
+                            &self.state.requires_clauses,
+                            &mut self.state.active_requires_parents,
+                        );
                         match clause {
                             // Skip logging for ForbidMultipleInstances, which is so noisy
                             Clause::ForbidMultipleInstances(..) => {}
@@ -1170,6 +1215,12 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 .map_err(|_| PropagationError::Conflict(solvable_id, value, clause_id))?;
 
             if decided {
+                track_decision_for_requires(
+                    solvable_id,
+                    value,
+                    &self.state.requires_clauses,
+                    &mut self.state.active_requires_parents,
+                );
                 tracing::trace!(
                     "Negative assertions derived from other rules: Propagate assertion {} = {}",
                     solvable_id.display(&self.state.variable_map, self.provider()),
@@ -1210,6 +1261,12 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 .map_err(|_| PropagationError::Conflict(literal.variable(), decision, clause_id))?;
 
             if decided {
+                track_decision_for_requires(
+                    literal.variable(),
+                    decision,
+                    &self.state.requires_clauses,
+                    &mut self.state.active_requires_parents,
+                );
                 tracing::trace!(
                     "├─ Propagate assertion {} = {}",
                     literal
@@ -1480,5 +1537,23 @@ impl SolverState {
                 None
             }
         })
+    }
+}
+
+/// Called after a decision is successfully added to the decision tracker.
+/// If the variable is assigned true and has requires clauses, it is added
+/// to `active_requires_parents` to speed up the `decide()` function.
+///
+/// This is a free function to enable split borrows - callers may hold borrows
+/// to other SolverState fields while calling this.
+#[inline]
+fn track_decision_for_requires(
+    variable: VariableId,
+    value: bool,
+    requires_clauses: &IndexMap<VariableId, Vec<RequiresClause>, ahash::RandomState>,
+    active_requires_parents: &mut IndexSet<VariableId, ahash::RandomState>,
+) {
+    if value && requires_clauses.contains_key(&variable) {
+        active_requires_parents.insert(variable);
     }
 }
