@@ -10,6 +10,8 @@ use petgraph::{
     graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex},
     visit::{Bfs, DfsPostOrder, EdgeRef},
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     DependencyProvider, Interner, Requirement,
@@ -22,7 +24,8 @@ use crate::{
 };
 
 /// Represents the cause of the solver being unable to find a solution
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Conflict {
     /// The clauses involved in an unsatisfiable conflict
     clauses: Vec<ClauseId>,
@@ -218,6 +221,7 @@ impl Conflict {
 
 /// A node in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ConflictNode {
     /// Node corresponding to a solvable
     Solvable(SolvableOrRootId),
@@ -247,6 +251,7 @@ impl ConflictNode {
 
 /// An edge in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ConflictEdge {
     /// The target node is a candidate for the dependency specified by the
     /// [`Requirement`]
@@ -273,6 +278,7 @@ impl ConflictEdge {
 
 /// Conflict causes
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ConflictCause {
     /// The solvable is locked
     Locked(SolvableId),
@@ -292,6 +298,7 @@ pub enum ConflictCause {
 /// - They all have the same name
 /// - They all have the same predecessor nodes
 /// - They all have the same successor nodes
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MergedConflictNode {
     /// The list of solvable ids that have been merged into this node.
     pub ids: Vec<SolvableId>,
@@ -303,6 +310,7 @@ pub struct MergedConflictNode {
 /// solvable's requirements are included in the graph, only those that are
 /// directly or indirectly involved in the conflict.
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConflictGraph {
     /// The conflict graph as a directed petgraph.
     pub graph: DiGraph<ConflictNode, ConflictEdge>,

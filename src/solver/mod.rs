@@ -10,6 +10,8 @@ use elsa::FrozenMap;
 use encoding::Encoder;
 use indexmap::IndexMap;
 use itertools::Itertools;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use variable_map::VariableMap;
 use watch_map::WatchMap;
 
@@ -214,10 +216,12 @@ impl<D: DependencyProvider> Solver<D, NowOrNeverRuntime> {
 
 /// The root cause of a solver error.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum UnsolvableOrCancelled {
     /// The problem was unsolvable.
     Unsolvable(Conflict),
     /// The solving process was cancelled.
+    #[cfg_attr(feature = "serde", serde(skip))]
     Cancelled(Box<dyn Any>),
 }
 
