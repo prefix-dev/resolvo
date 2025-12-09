@@ -19,7 +19,10 @@ use crate::{
 /// of the package and other metadata. A solvable is always associated with a
 /// [`NameId`], which is an interned name in the [`Pool`].
 pub struct Solvable<V> {
+    /// The name associated with the solvable
     pub name: NameId,
+
+    /// The record associated with the solvable
     pub record: V,
 }
 
@@ -244,7 +247,7 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
 }
 
 /// A helper struct to visualize a name.
-pub struct NameDisplay<'pool, VS: VersionSet, N: PackageName> {
+pub(crate) struct NameDisplay<'pool, VS: VersionSet, N: PackageName> {
     id: NameId,
     pool: &'pool Pool<VS, N>,
 }
@@ -261,7 +264,7 @@ impl NameId {
     pub fn display<VS: VersionSet, N: PackageName + Display>(
         self,
         pool: &Pool<VS, N>,
-    ) -> NameDisplay<'_, VS, N> {
+    ) -> impl Display {
         NameDisplay { id: self, pool }
     }
 }

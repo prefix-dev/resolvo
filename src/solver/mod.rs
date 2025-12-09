@@ -20,10 +20,10 @@ use crate::{
     internal::{
         arena::{Arena, ArenaId},
         id::{ClauseId, LearntClauseId, NameId, SolvableId, SolvableOrRootId, VariableId},
-        mapping::Mapping,
     },
     runtime::{AsyncRuntime, NowOrNeverRuntime},
     solver::binary_encoding::AtMostOnceTracker,
+    utils::Mapping,
 };
 
 mod binary_encoding;

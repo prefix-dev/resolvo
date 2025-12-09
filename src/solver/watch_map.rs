@@ -1,5 +1,6 @@
 use crate::{
-    internal::{arena::ArenaId, debug_expect_unchecked, id::ClauseId, mapping::Mapping},
+    Mapping,
+    internal::{arena::ArenaId, debug_expect_unchecked, id::ClauseId},
     solver::clause::{Literal, WatchedLiterals},
 };
 

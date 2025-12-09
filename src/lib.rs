@@ -9,6 +9,7 @@
 //! keep reading through this codebase and its comments.
 
 #![deny(missing_docs)]
+#![deny(unnameable_types)]
 
 mod conditional_requirement;
 pub mod conflict;
@@ -25,13 +26,14 @@ use std::{
 };
 
 pub use conditional_requirement::{Condition, ConditionalRequirement, LogicalOperator};
-pub use internal::{
-    id::{ConditionId, NameId, SolvableId, StringId, VersionSetId, VersionSetUnionId},
-    mapping::Mapping,
+pub use internal::arena::ArenaId;
+pub use internal::id::{
+    ConditionId, NameId, SolvableId, SolvableOrRootId, StringId, VersionSetId, VersionSetUnionId,
 };
 use itertools::Itertools;
 pub use requirement::Requirement;
 pub use solver::{Problem, Solver, SolverCache, UnsolvableOrCancelled};
+pub use utils::{Mapping, MappingIter};
 
 /// An object that is used by the solver to query certain properties of
 /// different internalized objects.
