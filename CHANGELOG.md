@@ -22,6 +22,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.1...resolvo-v0.10.2) - 2025-12-09
+
+### Added
+
+- update rust to 1.89.0 toolchain and add 1.85.1 msrv ([#167](https://github.com/prefix-dev/resolvo/pull/167))
+
+### Fixed
+
+- make all pub types nameable ([#193](https://github.com/prefix-dev/resolvo/pull/193))
+
+### Other
+
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.119 to 0.5.120 ([#190](https://github.com/prefix-dev/resolvo/pull/190))
+- *(ci)* bump actions/checkout from 6.0.0 to 6.0.1 ([#191](https://github.com/prefix-dev/resolvo/pull/191))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.118 to 0.5.119 ([#189](https://github.com/prefix-dev/resolvo/pull/189))
+- *(ci)* bump actions/checkout from 5.0.0 to 6.0.0 ([#186](https://github.com/prefix-dev/resolvo/pull/186))
+- *(ci)* bump prefix-dev/setup-pixi from 0.9.1 to 0.9.3 ([#183](https://github.com/prefix-dev/resolvo/pull/183))
+- *(ci)* bump prefix-dev/setup-pixi from 0.9.0 to 0.9.1 ([#177](https://github.com/prefix-dev/resolvo/pull/177))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#179](https://github.com/prefix-dev/resolvo/pull/179))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.117 to 0.5.118 ([#181](https://github.com/prefix-dev/resolvo/pull/181))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#180](https://github.com/prefix-dev/resolvo/pull/180))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#176](https://github.com/prefix-dev/resolvo/pull/176))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.114 to 0.5.117 ([#175](https://github.com/prefix-dev/resolvo/pull/175))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#172](https://github.com/prefix-dev/resolvo/pull/172))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.112 to 0.5.114 ([#173](https://github.com/prefix-dev/resolvo/pull/173))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#171](https://github.com/prefix-dev/resolvo/pull/171))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.110 to 0.5.112 ([#169](https://github.com/prefix-dev/resolvo/pull/169))
+- *(ci)* bump prefix-dev/setup-pixi from 0.8.14 to 0.9.0 ([#170](https://github.com/prefix-dev/resolvo/pull/170))
+- *(ci)* bump actions/checkout from 4.2.2 to 5.0.0 ([#165](https://github.com/prefix-dev/resolvo/pull/165))
+
 ## [0.10.0](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.9.1...resolvo-v0.10.0) - 2025-07-23
 
 ### Added
