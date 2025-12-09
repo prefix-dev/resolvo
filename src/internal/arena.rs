@@ -159,7 +159,10 @@ impl<TId: ArenaId, TValue> IndexMut<TId> for Arena<TId, TValue> {
 
 /// A trait indicating that the type can be transformed to `usize` and back
 pub trait ArenaId {
+    /// Constructs a new Id from an index.
     fn from_usize(x: usize) -> Self;
+
+    /// Returns the index of the Id.
     fn to_usize(self) -> usize;
 }
 

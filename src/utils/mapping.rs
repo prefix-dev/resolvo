@@ -21,7 +21,6 @@ impl<TId: ArenaId, TValue> Default for Mapping<TId, TValue> {
     }
 }
 
-#[allow(unused)]
 impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
     pub(crate) fn new() -> Self {
         Self::with_capacity(1)
@@ -184,6 +183,7 @@ impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
     }
 }
 
+/// An iterator over a [`Mapping`]
 pub struct MappingIter<'a, TId, TValue> {
     mapping: &'a Mapping<TId, TValue>,
     offset: usize,

@@ -239,19 +239,23 @@ impl<I: Interner> Display for DisplaySolvableId<'_, I> {
     }
 }
 
+/// Represents either a solvable id or the root id.
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct SolvableOrRootId(u32);
 
 impl SolvableOrRootId {
-    pub fn root() -> Self {
+    /// Constructs a new instance that represents the root
+    pub const fn root() -> Self {
         Self(0)
     }
 
+    /// Returns true if this instance represents the root node.
     pub fn is_root(self) -> bool {
         self.0 == 0
     }
 
+    /// Returns `Some(solvable)` if this instance represents a solvable.
     pub fn solvable(self) -> Option<SolvableId> {
         if self.0 == 0 {
             None
@@ -260,6 +264,7 @@ impl SolvableOrRootId {
         }
     }
 
+    /// Returns an object that can be used to format the solvable or root id.
     pub fn display<I: Interner>(self, interner: &I) -> impl Display + '_ {
         DisplaySolvableOrRootId {
             interner,

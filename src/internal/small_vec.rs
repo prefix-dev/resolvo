@@ -9,13 +9,14 @@ use std::{
 };
 
 #[derive(Clone)]
-pub enum SmallVec<T> {
+pub(crate) enum SmallVec<T> {
     Empty,
     One([T; 1]),
     Two([T; 2]),
     Flexible(Vec<T>),
 }
 
+#[allow(dead_code)]
 impl<T> SmallVec<T> {
     pub fn empty() -> Self {
         Self::Empty
