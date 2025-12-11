@@ -3,7 +3,7 @@ members = ["cpp", "tools/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.10.2"
+version = "0.10.3"
 authors = [
     "Adolfo Ochagavía <github@adolfo.ochagavia.nl>",
     "Bas Zalmstra <zalmstra.bas@gmail.com>",
