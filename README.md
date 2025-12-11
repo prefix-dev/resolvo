@@ -1,5 +1,5 @@
 <a href="https://github.com/prefix-dev/resolvo/">
-    <img src="https://github.com/user-attachments/assets/ccbc2489-3e94-48fd-9f6e-26ac5267b1d1" alt="banner">
+    <img src="https://github.com/user-attachments/assets/6057f65d-c809-4527-af8b-a853fbd55b50" alt="banner">
 </a>
 
 # Resolvo: Fast package resolver written in Rust
