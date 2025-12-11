@@ -1,9 +1,5 @@
-<a href="https://github.com/mamba-org/resolvo/">
-    <picture>
-      <source srcset="https://github.com/mamba-org/resolvo/assets/4995967/f039aae2-a658-4b88-9dbf-3376b837e85d" type="image/webp">
-      <source srcset="https://github.com/mamba-org/resolvo/assets/4995967/7f20c0e2-756f-47bf-b3d4-9df06f9da54e" type="image/png">
-      <img src="https://github.com/mamba-org/resolvo/assets/4995967/7f20c0e2-756f-47bf-b3d4-9df06f9da54e" alt="banner">
-    </picture>
+<a href="https://github.com/prefix-dev/resolvo/">
+    <img src="https://github.com/user-attachments/assets/ccbc2489-3e94-48fd-9f6e-26ac5267b1d1" alt="banner">
 </a>
 
 # Resolvo: Fast package resolver written in Rust
