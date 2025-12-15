@@ -38,7 +38,7 @@ jobs:
         with:
           components: clippy, rustfmt
       - name: Run rustfmt
-        uses: actions-rust-lang/rustfmt@559aa3035a47390ba96088dffa783b5d26da9326 # v1
+        uses: actions-rust-lang/rustfmt@4066006ec54a31931b9b1fddfd38f2fdf2d27143 # v1
       - name: Run clippy
         run: cargo clippy --workspace --all-features
 
