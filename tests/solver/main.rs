@@ -704,22 +704,22 @@ fn test_solve_with_additional() {
     let requirements = provider.requirements(&["a 0..10"]);
     let constraints = provider.version_sets(&["b 1..2", "c"]);
 
-    let extra_solvables = [
-        provider.solvable_id("b", 2),
-        provider.solvable_id("c", 1),
-        provider.solvable_id("e", 1),
+    let soft_requirements = provider.version_sets(&[
+        "b 2",
+        "c 1",
+        "e 1",
         // Does not obey the locked clause since it has not been requested
         // in a version set by another solvable
-        provider.solvable_id("locked", 1),
-        provider.solvable_id("unknown-deps", Pack::new(1).with_unknown_deps()),
-    ];
+        "locked 1",
+        "unknown-deps 1",
+    ]);
 
     let mut solver = Solver::new(provider);
 
     let problem = Problem::new()
         .requirements(requirements)
         .constraints(constraints)
-        .soft_requirements(extra_solvables);
+        .soft_requirements(soft_requirements);
     let solved = solver.solve(problem).unwrap();
 
     let result = transaction_to_string(solver.provider(), &solved);
@@ -756,21 +756,14 @@ fn test_solve_with_additional_with_constrains() {
     let requirements = provider.requirements(&["a 0..10", "e"]);
     let constraints = provider.version_sets(&["b 1..2", "c", "k 2..3"]);
 
-    let extra_solvables = [
-        provider.solvable_id("d", 1),
-        provider.solvable_id("g", 1),
-        provider.solvable_id("h", 1),
-        provider.solvable_id("j", 1),
-        provider.solvable_id("l", 1),
-        provider.solvable_id("k", 1),
-    ];
+    let soft_requirements = provider.version_sets(&["d 1", "g 1", "h 1", "j 1", "l 1", "k 1"]);
 
     let mut solver = Solver::new(provider);
 
     let problem = Problem::new()
         .requirements(requirements)
         .constraints(constraints)
-        .soft_requirements(extra_solvables);
+        .soft_requirements(soft_requirements);
 
     let solved = solver.solve(problem).unwrap();
 
@@ -783,6 +776,52 @@ fn test_solve_with_additional_with_constrains() {
         h=1
         i=1
         j=1
+        "###);
+}
+
+#[test]
+fn test_soft_requirements_with_alternatives() {
+    let mut provider = BundleBoxProvider::from_packages(&[
+        ("a", 1, vec![]),
+        ("b", 3, vec!["conflict"]), // Highest version conflicts
+        ("b", 2, vec![]),           // Should fallback to this
+        ("b", 1, vec![]),
+    ]);
+
+    let requirements = provider.requirements(&["a"]);
+    let soft_requirements = provider.version_sets(&["b"]); // Matches all b versions
+
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new()
+        .requirements(requirements)
+        .soft_requirements(soft_requirements);
+    let solved = solver.solve(problem).unwrap();
+
+    // Should install b=2 (fallback from b=3)
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r###"
+        a=1
+        b=2
+        "###);
+}
+
+#[test]
+fn test_soft_requirements_no_candidates() {
+    let mut provider = BundleBoxProvider::from_packages(&[("a", 1, vec![]), ("b", 1, vec![])]);
+
+    let requirements = provider.requirements(&["a"]);
+    let soft_requirements = provider.version_sets(&["b 5..10"]); // No matching versions
+
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new()
+        .requirements(requirements)
+        .soft_requirements(soft_requirements);
+    let solved = solver.solve(problem).unwrap();
+
+    // b should not be installed (no candidates match)
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r###"
+        a=1
         "###);
 }
 
