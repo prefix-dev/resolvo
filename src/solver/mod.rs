@@ -53,13 +53,13 @@ pub struct Problem<S> {
     soft_requirements: S,
 }
 
-impl Default for Problem<std::iter::Empty<SolvableId>> {
+impl Default for Problem<std::iter::Empty<VersionSetId>> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Problem<std::iter::Empty<SolvableId>> {
+impl Problem<std::iter::Empty<VersionSetId>> {
     /// Creates a new empty [`Problem`]. Use the setter methods to build the
     /// problem before passing it to the solver to be solved.
     pub fn new() -> Self {
@@ -71,7 +71,7 @@ impl Problem<std::iter::Empty<SolvableId>> {
     }
 }
 
-impl<S: IntoIterator<Item = SolvableId>> Problem<S> {
+impl<S: IntoIterator<Item = VersionSetId>> Problem<S> {
     /// Sets the requirements that _must_ have one candidate solvable be
     /// included in the solution.
     ///
@@ -103,15 +103,16 @@ impl<S: IntoIterator<Item = SolvableId>> Problem<S> {
     /// will try and fulfill as many soft requirements as possible and skip
     /// the unsatisfiable ones.
     ///
-    /// Soft requirements are currently only specified as individual solvables
-    /// to be included in the solution, however in the future they will be
-    /// able to be specified as version sets.
+    /// Soft requirements are specified as version sets. If a version set
+    /// matches multiple candidates, the solver will attempt to install them
+    /// in preference order (highest version first, respecting favored/locked
+    /// candidates).
     ///
     /// # Returns
     ///
     /// Returns the [`Problem`] for further mutation or to pass to
     /// [`Solver::solve`].
-    pub fn soft_requirements<I: IntoIterator<Item = SolvableId>>(
+    pub fn soft_requirements<I: IntoIterator<Item = VersionSetId>>(
         self,
         soft_requirements: I,
     ) -> Problem<I> {
@@ -316,7 +317,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// [`UnsolvableOrCancelled::Cancelled`] containing the cancellation value.
     pub fn solve(
         &mut self,
-        problem: Problem<impl IntoIterator<Item = SolvableId>>,
+        problem: Problem<impl IntoIterator<Item = VersionSetId>>,
     ) -> Result<Vec<SolvableId>, UnsolvableOrCancelled> {
         // Re-initialize the solver state.
         self.state = SolverState::default();
@@ -341,16 +342,32 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                   should have returned Err instead of Ok(false) if root is unsolvable"
         );
 
-        for additional in problem.soft_requirements {
-            let additional_var = self.state.variable_map.intern_solvable(additional);
+        for soft_requirement_version_set in problem.soft_requirements {
+            // Get sorted candidates matching the version set
+            let candidates = match self.async_runtime.block_on(
+                self.cache
+                    .get_or_cache_sorted_candidates_for_version_set(soft_requirement_version_set),
+            ) {
+                Ok(candidates) => candidates.to_vec(),
+                Err(_) => break, // Cancelled - stop processing soft requirements
+            };
 
-            if self
-                .state
-                .decision_tracker
-                .assigned_value(additional_var)
-                .is_none()
-            {
-                self.run_sat(additional.into(), &root_dependencies)?;
+            // Try each candidate in preference order until one succeeds
+            for candidate_solvable in candidates {
+                let candidate_var = self.state.variable_map.intern_solvable(candidate_solvable);
+
+                match self.state.decision_tracker.assigned_value(candidate_var) {
+                    Some(true) => break,     // Already installed, move to next soft requirement
+                    Some(false) => continue, // Already excluded, try next candidate
+                    None => {
+                        // Try to install this candidate
+                        match self.run_sat(candidate_solvable.into(), &root_dependencies) {
+                            Ok(true) => break,     // Success, move to next soft requirement
+                            Ok(false) => continue, // Conflict, try next candidate
+                            Err(_) => break,       // Error, skip this soft requirement
+                        }
+                    }
+                }
             }
         }
 
