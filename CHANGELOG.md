@@ -22,6 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.2...resolvo-v0.10.3) - 2026-03-23
+
+### Other
+
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#214](https://github.com/prefix-dev/resolvo/pull/214))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.127 to 0.5.128 ([#211](https://github.com/prefix-dev/resolvo/pull/211))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#212](https://github.com/prefix-dev/resolvo/pull/212))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#213](https://github.com/prefix-dev/resolvo/pull/213))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#209](https://github.com/prefix-dev/resolvo/pull/209))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#210](https://github.com/prefix-dev/resolvo/pull/210))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.126 to 0.5.127 ([#208](https://github.com/prefix-dev/resolvo/pull/208))
+- *(ci)* bump actions/checkout from 6.0.1 to 6.0.2 ([#204](https://github.com/prefix-dev/resolvo/pull/204))
+- *(ci)* bump prefix-dev/setup-pixi from 0.9.3 to 0.9.4 ([#205](https://github.com/prefix-dev/resolvo/pull/205))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#206](https://github.com/prefix-dev/resolvo/pull/206))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.121 to 0.5.126 ([#207](https://github.com/prefix-dev/resolvo/pull/207))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.120 to 0.5.121 ([#200](https://github.com/prefix-dev/resolvo/pull/200))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#197](https://github.com/prefix-dev/resolvo/pull/197))
+- *(ci)* bump actions-rust-lang/rustfmt from 1.1.1 to 1.1.2 ([#196](https://github.com/prefix-dev/resolvo/pull/196))
+- update banner to new style ([#194](https://github.com/prefix-dev/resolvo/pull/194))
+
 ## [0.10.2](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.1...resolvo-v0.10.2) - 2025-12-09
 
 ### Added
