@@ -884,4 +884,42 @@ mod test {
             std::mem::size_of::<WatchedLiterals>()
         );
     }
+
+    #[test]
+    fn test_clause_size() {
+        // The Clause enum should be kept small since we create thousands of instances.
+        // Asserted exactly to catch both growth (worse cache) and silent shrinkage
+        // (which would mean a variant got smaller and the bound is now loose).
+        assert_eq!(std::mem::size_of::<Clause>(), 16);
+    }
+
+    #[test]
+    fn test_key_type_sizes() {
+        use crate::internal::id::*;
+        eprintln!("=== Key type sizes ===");
+        eprintln!("VariableId: {} bytes", std::mem::size_of::<VariableId>());
+        eprintln!("ClauseId: {} bytes", std::mem::size_of::<ClauseId>());
+        eprintln!(
+            "Option<ClauseId>: {} bytes",
+            std::mem::size_of::<Option<ClauseId>>()
+        );
+        eprintln!("SolvableId: {} bytes", std::mem::size_of::<SolvableId>());
+        eprintln!("NameId: {} bytes", std::mem::size_of::<NameId>());
+        eprintln!(
+            "Requirement: {} bytes",
+            std::mem::size_of::<crate::Requirement>()
+        );
+        eprintln!(
+            "Decision: {} bytes",
+            std::mem::size_of::<super::super::decision::Decision>()
+        );
+        eprintln!(
+            "DecisionAndLevel (in DecisionMap): {} bytes",
+            std::mem::size_of::<i32>()
+        );
+        eprintln!(
+            "Clause + WatchedLiterals per clause: {} bytes",
+            std::mem::size_of::<Clause>() + std::mem::size_of::<Option<WatchedLiterals>>()
+        );
+    }
 }
