@@ -1,0 +1,8 @@
+---
+source: tests/solver/main.rs
+expression: error
+---
+The following packages are incompatible
+└─ a * cannot be installed because there are no viable options:
+   └─ a 1 would constrain
+      └─ b >=100, <200, which conflicts with any installable versions previously reported
