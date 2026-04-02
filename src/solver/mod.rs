@@ -20,6 +20,7 @@ use crate::{
     internal::{
         arena::{Arena, ArenaId},
         id::{ClauseId, LearntClauseId, NameId, SolvableId, SolvableOrRootId, VariableId},
+        indexed_set::IndexedSet,
     },
     runtime::{AsyncRuntime, NowOrNeverRuntime},
     solver::binary_encoding::AtMostOnceTracker,
@@ -184,8 +185,8 @@ pub(crate) struct SolverState {
 
     disjunctions: Arena<DisjunctionId, Disjunction>,
 
-    clauses_added_for_package: HashSet<NameId>,
-    clauses_added_for_solvable: HashSet<SolvableOrRootId>,
+    clauses_added_for_package: IndexedSet<NameId>,
+    clauses_added_for_solvable: IndexedSet<SolvableOrRootId>,
     at_most_one_trackers: HashMap<NameId, AtMostOnceTracker<VariableId>>,
 
     /// Keeps track of auxiliary variables that are used to encode at-least-one
@@ -585,7 +586,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     !self
                         .state
                         .clauses_added_for_solvable
-                        .contains(&solvable_or_root)
+                        .contains(solvable_or_root)
                 })
                 .map(|d| (d.variable, d.derived_from))
                 .collect();
@@ -1367,7 +1368,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         learnt_why: &Mapping<LearntClauseId, Vec<ClauseId>>,
         clause_id: ClauseId,
         conflict: &mut Conflict,
-        seen: &mut HashSet<ClauseId>,
+        seen: &mut IndexedSet<ClauseId>,
     ) {
         let clause = &clauses[clause_id.to_usize()];
         match clause {
@@ -1408,7 +1409,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             },
         );
 
-        let mut seen = HashSet::default();
+        let mut seen = IndexedSet::default();
         Self::analyze_unsolvable_clause(
             &self.state.clauses.kinds,
             &self.state.learnt_why,

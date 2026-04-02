@@ -283,6 +283,16 @@ impl From<SolvableId> for SolvableOrRootId {
     }
 }
 
+impl ArenaId for SolvableOrRootId {
+    fn from_usize(x: usize) -> Self {
+        Self(x.try_into().expect("solvable-or-root id too big"))
+    }
+
+    fn to_usize(self) -> usize {
+        self.0 as usize
+    }
+}
+
 pub(crate) struct DisplaySolvableOrRootId<'i, I: Interner> {
     interner: &'i I,
     solvable_id: SolvableOrRootId,
