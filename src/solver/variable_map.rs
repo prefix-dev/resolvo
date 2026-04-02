@@ -1,4 +1,4 @@
-use std::{collections::hash_map::Entry, fmt::Display};
+use std::fmt::Display;
 
 use ahash::HashMap;
 
@@ -23,8 +23,12 @@ pub struct VariableMap {
     /// A map from solvable id to variable id.
     solvable_to_variable: HashMap<SolvableId, VariableId>,
 
-    /// Records the origins of all variables.
-    origins: HashMap<VariableId, VariableOrigin>,
+    /// Records the origin of each variable, indexed by its [`VariableId`].
+    ///
+    /// Invariant: `origins.len() == next_id`, i.e. every allocated variable
+    /// has its slot pushed in the same step it is handed out. Do not insert
+    /// gaps; [`Self::origin`] indexes directly.
+    origins: Vec<VariableOrigin>,
 }
 
 /// Describes the origin of a variable.
@@ -46,32 +50,37 @@ pub enum VariableOrigin {
 
 impl Default for VariableMap {
     fn default() -> Self {
-        let mut origins = HashMap::default();
-        origins.insert(VariableId::root(), VariableOrigin::Root);
-
         Self {
-            next_id: 1, // The first variable id is 1 because 0 is reserved for the root.
+            // The first variable id is 1 because 0 is reserved for the root.
+            next_id: 1,
             solvable_to_variable: HashMap::default(),
-            origins,
+            origins: vec![VariableOrigin::Root],
         }
     }
 }
 
 impl VariableMap {
+    /// Allocate a new variable with the given origin and hand back its id.
+    ///
+    /// This is the single place that mutates `next_id`/`origins` together,
+    /// preserving the `origins.len() == next_id` invariant. Always extends
+    /// `origins` by exactly one slot.
+    fn alloc(&mut self, origin: VariableOrigin) -> VariableId {
+        let id = self.next_id;
+        self.next_id += 1;
+        debug_assert_eq!(id, self.origins.len());
+        self.origins.push(origin);
+        VariableId::from_usize(id)
+    }
+
     /// Allocate a variable for a new variable or reuse an existing one.
     pub fn intern_solvable(&mut self, solvable_id: SolvableId) -> VariableId {
-        match self.solvable_to_variable.entry(solvable_id) {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => {
-                let id = self.next_id;
-                self.next_id += 1;
-                let variable_id = VariableId::from_usize(id);
-                entry.insert(variable_id);
-                self.origins
-                    .insert(variable_id, VariableOrigin::Solvable(solvable_id));
-                variable_id
-            }
+        if let Some(&variable_id) = self.solvable_to_variable.get(&solvable_id) {
+            return variable_id;
         }
+        let variable_id = self.alloc(VariableOrigin::Solvable(solvable_id));
+        self.solvable_to_variable.insert(solvable_id, variable_id);
+        variable_id
     }
 
     #[cfg(feature = "diagnostics")]
@@ -81,7 +90,7 @@ impl VariableMap {
 
     #[cfg(feature = "diagnostics")]
     pub fn size_in_bytes(&self) -> usize {
-        self.origins.capacity() * std::mem::size_of::<(VariableId, VariableOrigin)>()
+        self.origins.capacity() * std::mem::size_of::<VariableOrigin>()
             + self.solvable_to_variable.capacity() * std::mem::size_of::<(SolvableId, VariableId)>()
     }
 
@@ -95,29 +104,19 @@ impl VariableMap {
 
     /// Allocate a variable that helps encode an at most one constraint.
     pub fn alloc_forbid_multiple_variable(&mut self, name: NameId) -> VariableId {
-        let id = self.next_id;
-        self.next_id += 1;
-        let variable_id = VariableId::from_usize(id);
-        self.origins
-            .insert(variable_id, VariableOrigin::ForbidMultiple(name));
-        variable_id
+        self.alloc(VariableOrigin::ForbidMultiple(name))
     }
 
     /// Allocate a variable helps encode whether at least one solvable for a
     /// particular package is selected.
     pub fn alloc_at_least_one_variable(&mut self, name: NameId) -> VariableId {
-        let id = self.next_id;
-        self.next_id += 1;
-        let variable_id = VariableId::from_usize(id);
-        self.origins
-            .insert(variable_id, VariableOrigin::AtLeastOne(name));
-        variable_id
+        self.alloc(VariableOrigin::AtLeastOne(name))
     }
 
     /// Returns the origin of a variable. The origin describes the semantics of
     /// a variable.
     pub fn origin(&self, variable_id: VariableId) -> VariableOrigin {
-        self.origins[&variable_id].clone()
+        self.origins[variable_id.to_usize()].clone()
     }
 }
 
