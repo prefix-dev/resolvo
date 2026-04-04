@@ -353,16 +353,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 condition.zip(condition_literals),
                 &self.state.decision_tracker,
             );
-            let clause_id = self.state.clauses.alloc(watched_literals, kind);
-
-            let watched_literals =
-                self.state.clauses.watched_literals[clause_id.to_usize()].as_mut();
-
-            if let Some(watched_literals) = watched_literals {
-                self.state
-                    .watches
-                    .start_watching(watched_literals, clause_id);
-            }
+            let clause_id = self.state.add_clause(watched_literals, kind);
 
             self.state
                 .requires_clauses
@@ -412,18 +403,8 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 &self.state.decision_tracker,
             );
 
-            // Allocate the clause for the constraint
-            let clause_id = self.state.clauses.alloc(watched_literals, kind);
+            let clause_id = self.state.add_clause(watched_literals, kind);
 
-            // Start watching the clause
-            let watched_literals = self.state.clauses.watched_literals[clause_id.to_usize()]
-                .as_mut()
-                .expect("a forbid clause must always have watched literals");
-            self.state
-                .watches
-                .start_watching(watched_literals, clause_id);
-
-            // Mark conflicting clauses
             if conflict {
                 self.conflicting_clauses.push(clause_id);
             }
@@ -448,15 +429,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             // Allocated the clause for the exclusion
             let (watched_literals, kind) =
                 WatchedLiterals::lock(locked_solvable_var, other_candidate_var);
-            let clause_id = self.state.clauses.alloc(watched_literals, kind);
-
-            // Start watching the clause.
-            let watched_literals = self.state.clauses.watched_literals[clause_id.to_usize()]
-                .as_mut()
-                .expect("a forbid clause must always have watched literals");
-            self.state
-                .watches
-                .start_watching(watched_literals, clause_id);
+            self.state.add_clause(watched_literals, kind);
         }
     }
 
@@ -470,7 +443,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
         // Allocate a clause for the exclusion
         let (watched_literals, kind) = WatchedLiterals::exclude(variable, reason);
-        let clause_id = self.state.clauses.alloc(watched_literals, kind);
+        let clause_id = self.state.add_clause(watched_literals, kind);
 
         // Exclusions are negative assertions, tracked outside the watcher
         self.state.negative_assertions.push((variable, clause_id));
@@ -643,14 +616,15 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     let literal_a = a.negative();
                     let (watched_literals, kind) =
                         WatchedLiterals::forbid_multiple(a, literal_b, name_id);
+                    // Inlined `add_clause`: `other_solvables` (above) holds a
+                    // mutable borrow of `at_most_one_trackers`, so we cannot
+                    // call `self.state.add_clause(..)` here.
                     let clause_id = self.state.clauses.alloc(watched_literals, kind);
-                    let watched_literals = self.state.clauses.watched_literals
-                        [clause_id.to_usize()]
-                    .as_mut()
-                    .expect("forbid clause must have watched literals");
-                    self.state
-                        .watches
-                        .start_watching(watched_literals, clause_id);
+                    if let Some(wl) =
+                        self.state.clauses.watched_literals[clause_id.to_usize()].as_mut()
+                    {
+                        self.state.watches.start_watching(wl, clause_id);
+                    }
 
                     // Add a decision if a decision has already been made for one of the literals.
                     let set_literal = match (
@@ -690,14 +664,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 {
                     let (watched_literals, kind) =
                         WatchedLiterals::any_of(at_least_one_variable, candidate_var);
-                    let clause_id = self.state.clauses.alloc(watched_literals, kind);
-                    let watched_literals = self.state.clauses.watched_literals
-                        [clause_id.to_usize()]
-                    .as_mut()
-                    .expect("forbid clause must have watched literals");
-                    self.state
-                        .watches
-                        .start_watching(watched_literals, clause_id);
+                    self.state.add_clause(watched_literals, kind);
                 }
             }
         }
@@ -722,23 +689,20 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         for (name_id, at_least_one_variable) in self.new_at_least_one_packages.drain(..) {
             // Find the at-most-one tracker for the package. We want to reuse the same
             // variables.
-            let variables = self
+            // Collect variable IDs to avoid borrowing at_most_one_trackers
+            // across the mutable add_clause call.
+            let variables: Vec<_> = self
                 .state
                 .at_most_one_trackers
                 .get(&name_id)
-                .map(|tracker| &tracker.variables);
+                .map(|tracker| tracker.variables.iter().copied().collect())
+                .unwrap_or_default();
 
             // Add clauses for the existing variables.
-            for &helper_var in variables.into_iter().flatten() {
+            for helper_var in variables {
                 let (watched_literals, kind) =
                     WatchedLiterals::any_of(at_least_one_variable, helper_var);
-                let clause_id = self.state.clauses.alloc(watched_literals, kind);
-                let watched_literals = self.state.clauses.watched_literals[clause_id.to_usize()]
-                    .as_mut()
-                    .expect("forbid clause must have watched literals");
-                self.state
-                    .watches
-                    .start_watching(watched_literals, clause_id);
+                let clause_id = self.state.add_clause(watched_literals, kind);
 
                 // Assign true if any of the variables is true.
                 if self.state.decision_tracker.assigned_value(helper_var) == Some(true) {

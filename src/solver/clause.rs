@@ -109,6 +109,22 @@ pub(crate) enum Clause {
 }
 
 impl Clause {
+    /// Returns `true` if the clause has exactly two literals that can never
+    /// change. The propagation loop relies on this to skip the
+    /// `next_unwatched_literal` scan, which can never succeed for such
+    /// clauses.
+    pub fn is_binary(&self) -> bool {
+        matches!(
+            self,
+            Clause::Constrains(..)
+                | Clause::ForbidMultipleInstances(..)
+                | Clause::Lock(..)
+                | Clause::AnyOf(..)
+        )
+    }
+}
+
+impl Clause {
     /// Returns the building blocks needed for a new [WatchedLiterals] of the
     /// [Clause::Requires] kind.
     ///
@@ -491,10 +507,7 @@ impl WatchedLiterals {
         match clause {
             Clause::InstallRoot => unreachable!(),
             Clause::Excluded(_, _) => unreachable!(),
-            Clause::Constrains(..) | Clause::ForbidMultipleInstances(..) | Clause::Lock(..) => {
-                // We cannot move the watches in these clauses.
-                None
-            }
+            _ if clause.is_binary() => None,
             clause => {
                 let next = clause.try_fold_literals(
                     learnt_clauses,

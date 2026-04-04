@@ -321,6 +321,11 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         self.cache.provider()
     }
 
+    /// Returns the number of clauses in the solver after solving.
+    pub fn clause_count(&self) -> usize {
+        self.state.clauses.kinds.len()
+    }
+
     /// Set the runtime of the solver to `runtime`.
     #[must_use]
     pub fn with_runtime<RT2: AsyncRuntime>(self, runtime: RT2) -> Solver<D, RT2> {
@@ -389,7 +394,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         // this is indeed the case.
         let root_clause = {
             let (state, kind) = WatchedLiterals::root();
-            self.state.clauses.alloc(state, kind)
+            self.state.add_clause(state, kind)
         };
         assert_eq!(root_clause, ClauseId::install_root());
 
@@ -1194,8 +1199,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 "we are only watching literals that are turning false"
             );
 
-            // Propagate, iterating through the linked list of clauses that watch this
-            // solvable
+            // Propagate, iterating through the linked list of clauses that
+            // watch this solvable.
             let mut next_cursor = self
                 .state
                 .watches
@@ -1223,14 +1228,27 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     }
                     // Continue with the next clause in the linked list.
                     next_cursor = cursor.next();
-                } else if let Some(literal) = watched_literals.next_unwatched_literal(
-                    clause,
-                    &self.state.learnt_clauses,
-                    &self.state.requirement_to_sorted_candidates,
-                    &self.state.disjunctions,
-                    self.state.decision_tracker.map(),
-                    watch_index,
-                ) {
+                } else if let Some(literal) = if clause.is_binary() {
+                    // Binary clauses can never move their watches; skip the
+                    // `next_unwatched_literal` scan entirely.
+                    None
+                } else {
+                    #[cfg(feature = "diagnostics")]
+                    {
+                        self.state
+                            .propagation_counters
+                            .unwatched_calls_by_type
+                            .count(clause);
+                    }
+                    watched_literals.next_unwatched_literal(
+                        clause,
+                        &self.state.learnt_clauses,
+                        &self.state.requirement_to_sorted_candidates,
+                        &self.state.disjunctions,
+                        self.state.decision_tracker.map(),
+                        watch_index,
+                    )
+                } {
                     #[cfg(feature = "diagnostics")]
                     {
                         self.state.propagation_counters.watch_moves += 1;
@@ -1566,15 +1584,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         self.state.learnt_why.insert(learnt_id, learnt_why);
 
         let (watched_literals, kind) = WatchedLiterals::learnt(learnt_id, &learnt);
-        let clause_id = self.state.clauses.alloc(watched_literals, kind);
+        let clause_id = self.state.add_clause(watched_literals, kind);
         self.state.learnt_clause_ids.push(clause_id);
-        if let Some(watched_literals) =
-            self.state.clauses.watched_literals[clause_id.to_usize()].as_mut()
-        {
-            self.state
-                .watches
-                .start_watching(watched_literals, clause_id);
-        }
 
         tracing::debug!("│├ Learnt disjunction:",);
         for lit in learnt {
@@ -1605,6 +1616,23 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
 }
 
 impl SolverState {
+    /// Allocate a clause and, if it has watched literals, register them in
+    /// the [`WatchMap`].
+    pub(crate) fn add_clause(
+        &mut self,
+        watched_literals: Option<WatchedLiterals>,
+        kind: Clause,
+    ) -> ClauseId {
+        let clause_id = self.clauses.alloc(watched_literals, kind);
+        let Some(wl) = self.clauses.watched_literals[clause_id.to_usize()].as_mut() else {
+            return clause_id;
+        };
+
+        self.watches.start_watching(wl, clause_id);
+
+        clause_id
+    }
+
     /// Returns the solvables that the solver has chosen to include in the
     /// solution so far.
     fn chosen_solvables(&self) -> impl Iterator<Item = SolvableId> + '_ {
