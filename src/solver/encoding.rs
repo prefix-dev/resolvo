@@ -12,6 +12,7 @@ use crate::{
     internal::{
         arena::ArenaId,
         id::{ClauseId, SolvableOrRootId, VariableId},
+        indexed_set::IndexedSet,
     },
     solver::{conditions::Disjunction, decision::Decision},
 };
@@ -45,6 +46,12 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
 
     /// Stores for which packages and solvables we want to add forbid clauses.
     pending_forbid_clauses: IndexMap<NameId, Vec<VariableId>, ahash::RandomState>,
+
+    /// Tracks which variables have already been added to
+    /// `pending_forbid_clauses` to avoid accumulating millions of duplicate
+    /// entries. A variable belongs to exactly one package, so deduplicating
+    /// globally is safe.
+    forbid_seen: IndexedSet<VariableId>,
 
     /// A set of packages that should have an at-least-once tracker.
     new_at_least_one_packages: IndexMap<NameId, VariableId, ahash::RandomState>,
@@ -105,6 +112,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             pending_futures: FuturesUnordered::new(),
             conflicting_clauses: Vec::new(),
             pending_forbid_clauses: IndexMap::default(),
+            forbid_seen: IndexedSet::default(),
             level,
             new_at_least_one_packages: IndexMap::default(),
         }
@@ -272,15 +280,22 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             })
         {
             let name_id = self.cache.provider().solvable_name(solvable);
-            self.pending_forbid_clauses
-                .entry(name_id)
-                .or_default()
-                .push(variable_id);
+            self.register_forbid_target(name_id, variable_id);
         }
 
         // Queue requesting the dependencies of the candidates as well if they are
         // cheaply available from the dependency provider.
         for &candidate in candidates.iter().flat_map(|solvables| solvables.iter()) {
+            // Pre-check before `queue_solvable` does the same: skips the
+            // `are_dependencies_available_for` query and the async closure
+            // setup on the hot duplicate path.
+            if self
+                .state
+                .clauses_added_for_solvable
+                .contains(SolvableOrRootId::from(candidate))
+            {
+                continue;
+            }
             // If the dependencies are already available for the
             // candidate, queue the candidate for processing.
             if self.cache.are_dependencies_available_for(candidate) {
@@ -297,14 +312,11 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     match disjunction_complement {
                         DisjunctionComplement::Solvables(version_set, solvables) => {
                             let name_id = self.cache.provider().version_set_name(version_set);
-                            let pending_forbid_clauses =
-                                self.pending_forbid_clauses.entry(name_id).or_default();
                             disjunction_literals.reserve(solvables.len());
-                            pending_forbid_clauses.reserve(solvables.len());
                             for &solvable in solvables {
                                 let variable = self.state.variable_map.intern_solvable(solvable);
                                 disjunction_literals.push(variable.positive());
-                                pending_forbid_clauses.push(variable);
+                                self.register_forbid_target(name_id, variable);
                             }
                         }
                         DisjunctionComplement::Empty(version_set) => {
@@ -587,6 +599,18 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
         self.pending_futures
             .push(query_constraints_candidates.boxed_local());
+    }
+
+    /// Record `variable` as a candidate for a forbid-multiple clause under
+    /// `name_id`. Returns silently if the variable has already been registered;
+    /// see [`Self::forbid_seen`] for why globally-deduplicating is safe.
+    fn register_forbid_target(&mut self, name_id: NameId, variable: VariableId) {
+        if self.forbid_seen.insert(variable) {
+            self.pending_forbid_clauses
+                .entry(name_id)
+                .or_default()
+                .push(variable);
+        }
     }
 
     /// Add forbid clauses for solvables that we discovered as reachable from a
