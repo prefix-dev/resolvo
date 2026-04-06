@@ -1,4 +1,4 @@
-[project]
+[workspace]
 name = "resolvo"
 authors = ["Bas Zalmstra <bas@prefix.dev>"]
 channels = ["https://prefix.dev/conda-forge"]
@@ -61,3 +61,6 @@ cmd = "cmake-format -i CMakeLists.txt cpp/CMakeLists.txt cpp/tests/CMakeLists.tx
 [environments.format-cpp]
 features=["format-cpp"]
 solve-group="default"
+
+[dependencies]
+python = ">=3.14.3,<3.15"

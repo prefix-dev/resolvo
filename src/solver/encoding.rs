@@ -1,4 +1,4 @@
-use std::{any::Any, future::ready};
+use std::{any::Any, collections::VecDeque, future::ready};
 
 use futures::{
     FutureExt, StreamExt, TryFutureExt, future::LocalBoxFuture, stream::FuturesUnordered,
@@ -55,6 +55,10 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
 
     /// A set of packages that should have an at-least-once tracker.
     new_at_least_one_packages: IndexMap<NameId, VariableId, ahash::RandomState>,
+
+    /// Results from futures that completed immediately during
+    /// `try_immediate_or_queue`.
+    pending_results: VecDeque<Result<TaskResult<'cache>, Box<dyn Any>>>,
 }
 
 /// The result of a future that was queued for processing.
@@ -115,6 +119,30 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             forbid_seen: IndexedSet::default(),
             level,
             new_at_least_one_packages: IndexMap::default(),
+            pending_results: VecDeque::new(),
+        }
+    }
+
+    /// Poll `future` once on the stack. If it resolves immediately (as all
+    /// futures do under [`NowOrNeverRuntime`]), record the result for
+    /// iterative processing; otherwise hand the boxed future off to
+    /// [`Self::pending_futures`] for later polling.
+    ///
+    /// We still box the future, so the allocation cost is the same. The
+    /// win over pushing straight to `FuturesUnordered` is avoiding its slab
+    /// and waker bookkeeping.
+    fn queue_future<F>(&mut self, future: F)
+    where
+        F: std::future::Future<Output = Result<TaskResult<'cache>, Box<dyn Any>>> + 'cache,
+    {
+        let mut boxed = future.boxed_local();
+        match boxed.as_mut().now_or_never() {
+            Some(result) => self.pending_results.push_back(result),
+            None => {
+                // Future is still pending. Hand the boxed future to
+                // `pending_futures` so it can be polled asynchronously.
+                self.pending_futures.push(boxed);
+            }
         }
     }
 
@@ -128,8 +156,19 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             self.queue_solvable(solvable_id);
         }
 
-        // Process all pending futures until there are no more.
-        while let Some(future_result) = self.pending_futures.next().await {
+        // Process pending work until none remains. Immediately completed
+        // futures are drained iteratively rather than recursing through
+        // on_task_result -> queue_* -> on_task_result. Each loop iteration
+        // drains synchronously-ready results first, then awaits the next
+        // truly-async future, so the trailing drain on stream exhaustion
+        // happens naturally on the next iteration.
+        loop {
+            while let Some(result) = self.pending_results.pop_front() {
+                self.on_task_result(result?);
+            }
+            let Some(future_result) = self.pending_futures.next().await else {
+                break;
+            };
             self.on_task_result(future_result?);
         }
 
@@ -481,10 +520,9 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             return;
         }
 
-        // Construct a future that queries the dependencies for the solvable
         let cache = self.cache;
         let root_dependencies = self.root_dependencies;
-        let query_dependencies = async move {
+        self.queue_future(async move {
             let dependencies = match solvable_id.solvable() {
                 None => root_dependencies,
                 Some(solvable_id) => cache.get_or_cache_dependencies(solvable_id).await?,
@@ -493,10 +531,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 solvable_id,
                 dependencies,
             }))
-        };
-
-        // Queue the future for processing
-        self.pending_futures.push(query_dependencies.boxed_local());
+        });
     }
 
     /// Enqueues retrieving all candidates for a particular package name.
@@ -506,18 +541,14 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             return;
         }
 
-        // Construct a future that queries the candidates for the package
         let cache = self.cache;
-        let query_candidates = async move {
+        self.queue_future(async move {
             let package_candidates = cache.get_or_cache_candidates(name_id).await?;
             Ok(TaskResult::Candidates(CandidatesAvailable {
                 name_id,
                 package_candidates,
             }))
-        };
-
-        // Queue the future for processing
-        self.pending_futures.push(query_candidates.boxed_local());
+        });
     }
 
     /// Enqueues retrieving the candidates for a particular requirement. These
@@ -528,7 +559,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         requirement: ConditionalRequirement,
     ) {
         let cache = self.cache;
-        let query_requirements_candidates = async move {
+        self.queue_future(async move {
             let candidates = futures::future::try_join_all(
                 requirement
                     .requirement
@@ -574,17 +605,14 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     condition,
                 },
             ))
-        };
-
-        self.pending_futures
-            .push(query_requirements_candidates.boxed_local());
+        });
     }
 
     /// Enqueues retrieving the candidates for a particular constraint. These
     /// are the candidates that do *not* match the version set.
     fn queue_constraint(&mut self, solvable_id: SolvableOrRootId, constraint: VersionSetId) {
         let cache = self.cache;
-        let query_constraints_candidates = async move {
+        self.queue_future(async move {
             let non_matching_candidates = cache
                 .get_or_cache_non_matching_candidates(constraint)
                 .await?;
@@ -595,10 +623,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     candidates: non_matching_candidates,
                 },
             ))
-        };
-
-        self.pending_futures
-            .push(query_constraints_candidates.boxed_local());
+        });
     }
 
     /// Record `variable` as a candidate for a forbid-multiple clause under
