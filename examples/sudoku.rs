@@ -1,3 +1,19 @@
+//! Solves sudoku puzzles using resolvo's CDCL SAT solver.
+//!
+//! This example demonstrates that resolvo — a package dependency resolver — can solve
+//! constraint satisfaction problems beyond package resolution. It maps sudoku concepts
+//! to resolvo's domain model:
+//!
+//! | Sudoku              | Resolvo              | Example             |
+//! |---------------------|----------------------|---------------------|
+//! | Cell (81 total)     | Package (`NameId`)   | `r0c0`, `r4c7`      |
+//! | Digit 1-9 for cell  | Version (`SolvableId`)| `r0c0=5`           |
+//! | "Cell needs a digit"| Requirement          | "install r0c0"      |
+//! | Row/col/box rules   | Constraint           | "r0c0 excludes 5 from peers" |
+//! | Pre-filled cell     | Locked candidate     | "r0c0 must be 5"    |
+//!
+//! Usage: `cargo run --example sudoku -- "53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79"`
+
 use std::fmt::{self, Display};
 use std::process;
 
@@ -8,15 +24,26 @@ use resolvo::{
     SolverCache, StringId, VersionSetId, VersionSetUnionId,
 };
 
-/// A set of digits 1-9 represented as a bitmask.
+// -- VersionSet implementation ------------------------------------------------
+//
+// Resolvo is generic over what "versions" mean. In package management, a version
+// set might be a semver range like ">=1.2, <2.0". For sudoku, our "versions" are
+// digits 1-9, and a "version set" is a subset of those digits. We represent this
+// compactly as a bitmask.
+
+/// A set of digits 1-9 represented as a bitmask. Bit N set means digit N is in
+/// the set. This serves as resolvo's `VersionSet` — the analog of a semver range,
+/// but for sudoku digits.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 struct DigitSet(u16);
 
 impl DigitSet {
+    /// All digits 1-9. Used as the "any version" requirement for each cell.
     fn all() -> Self {
         DigitSet(0b1111111110) // bits 1-9 set
     }
 
+    /// A single digit. Used to build exclusion constraints between peer cells.
     fn singleton(digit: u8) -> Self {
         DigitSet(1 << digit)
     }
@@ -45,10 +72,23 @@ impl VersionSet for DigitSet {
     type V = u8;
 }
 
+// -- SudokuProvider -----------------------------------------------------------
+//
+// The provider is the bridge between the problem domain (sudoku) and the solver.
+// It tells resolvo what "packages" exist (cells), what "versions" are available
+// (digits 1-9), and what constraints apply (no duplicate digits in any row,
+// column, or 3x3 box).
+
+/// Implements resolvo's `DependencyProvider` and `Interner` traits to present a
+/// sudoku puzzle as a package resolution problem.
 struct SudokuProvider {
     pool: Pool<DigitSet>,
+    /// Pre-filled digits. `givens[row * 9 + col] = Some(d)` means the cell is fixed.
     givens: [Option<u8>; 81],
+    /// Flat lookup: `solvables[cell * 9 + (digit - 1)]` gives the SolvableId for
+    /// "cell X takes digit D".
     solvables: Vec<SolvableId>,
+    /// One NameId per cell, indexed by `row * 9 + col`.
     names: Vec<NameId>,
 }
 
@@ -58,6 +98,7 @@ impl SudokuProvider {
         let mut names = Vec::with_capacity(81);
         let mut solvables = Vec::with_capacity(81 * 9);
 
+        // Register 81 "packages" (cells) with 9 "versions" (digits) each.
         for cell in 0..81 {
             let row = cell / 9;
             let col = cell % 9;
@@ -82,12 +123,18 @@ impl SudokuProvider {
         self.solvables[cell * 9 + (digit as usize - 1)]
     }
 
+    /// Reverse lookup: given a solvable, return which cell and digit it represents.
     fn cell_and_digit(&self, solvable: SolvableId) -> (usize, u8) {
         let record = self.pool.resolve_solvable(solvable);
         let cell = self.names.iter().position(|&n| n == record.name).unwrap();
         (cell, record.record)
     }
 }
+
+// -- Interner impl ------------------------------------------------------------
+//
+// The Interner trait provides human-readable display for solver objects. This is
+// used in error messages when a puzzle is unsolvable.
 
 impl Interner for SudokuProvider {
     fn display_solvable(&self, solvable: SolvableId) -> impl Display + '_ {
@@ -138,8 +185,23 @@ impl Interner for SudokuProvider {
     }
 }
 
+// -- DependencyProvider impl --------------------------------------------------
+//
+// This is where the sudoku rules are encoded. The key insight:
+//
+// - `get_candidates` tells the solver what digits are possible for each cell.
+//   Pre-filled cells have a single `locked` candidate.
+//
+// - `get_dependencies` encodes the sudoku constraint: when a cell is assigned
+//   digit D, every peer cell (same row, column, or 3x3 box) is constrained to
+//   NOT contain digit D. This is expressed via `constrains` — resolvo's mechanism
+//   for saying "if package X is in the solution, it must satisfy this version set."
+//
+// - `filter_candidates` applies a DigitSet constraint to narrow candidates.
+
 impl SudokuProvider {
-    /// Returns the indices of the 20 peer cells (same row, column, or box) for a given cell.
+    /// Returns the 20 peer cell indices for a given cell — all cells that share
+    /// the same row, column, or 3x3 box (excluding the cell itself).
     fn peers(cell: usize) -> impl Iterator<Item = usize> {
         let row = cell / 9;
         let col = cell % 9;
@@ -186,6 +248,7 @@ impl DependencyProvider for SudokuProvider {
             .map(|digit| self.solvable_id(cell, digit))
             .collect();
 
+        // If this cell has a pre-filled digit, lock the solver to that single candidate.
         let locked = self.givens[cell].map(|digit| self.solvable_id(cell, digit));
 
         Some(Candidates {
@@ -204,6 +267,9 @@ impl DependencyProvider for SudokuProvider {
     async fn get_dependencies(&self, solvable: SolvableId) -> Dependencies {
         let (cell, digit) = self.cell_and_digit(solvable);
 
+        // For each peer cell, add a constraint: "peer must NOT be this digit."
+        // In resolvo terms, `constrains` means "the peer's version must match this set",
+        // so we use the complement — all digits except the current one.
         let mut constrains = Vec::new();
         for peer in Self::peers(cell) {
             let peer_name = self.names[peer];
@@ -219,6 +285,9 @@ impl DependencyProvider for SudokuProvider {
     }
 }
 
+// -- Puzzle I/O ---------------------------------------------------------------
+
+/// Parses an 81-character string into a grid of givens. '.' or '0' means empty.
 fn parse_puzzle(input: &str) -> Result<[Option<u8>; 81], String> {
     if input.len() != 81 {
         return Err(format!("Expected 81 characters, got {}", input.len()));
@@ -245,12 +314,18 @@ fn print_grid(grid: &[u8; 81]) {
             if col % 3 == 0 {
                 print!("│ ");
             }
-            print!("{} ", grid[row * 9 + col]);
+            if grid[row * 9 + col] == 0 {
+                print!(". ");
+            } else {
+                print!("{} ", grid[row * 9 + col]);
+            }
         }
         println!("│");
     }
     println!("└───────┴───────┴───────┘");
 }
+
+// -- Main ---------------------------------------------------------------------
 
 fn main() {
     let input = match std::env::args().nth(1) {
@@ -275,8 +350,18 @@ fn main() {
         }
     };
 
+    // Print the unsolved puzzle.
+    let mut puzzle_grid = [0u8; 81];
+    for (i, g) in givens.iter().enumerate() {
+        puzzle_grid[i] = g.unwrap_or(0);
+    }
+    print_grid(&puzzle_grid);
+    println!();
+
     let provider = SudokuProvider::new(givens);
 
+    // Each cell must be assigned exactly one digit. We express this as a
+    // requirement per cell: "pick some version (digit) from DigitSet::all()."
     let requirements: Vec<ConditionalRequirement> = provider
         .names
         .iter()
@@ -288,6 +373,7 @@ fn main() {
 
     let problem = Problem::new().requirements(requirements);
 
+    // Solve using resolvo's CDCL SAT solver.
     let mut solver = Solver::new(provider);
     match solver.solve(problem) {
         Ok(solution) => {
