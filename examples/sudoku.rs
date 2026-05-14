@@ -384,6 +384,11 @@ fn main() {
             }
             print_grid(&grid);
         }
+        Err(resolvo::UnsolvableOrCancelled::Unsolvable(conflict)) => {
+            eprintln!("No solution exists. The solver found these conflicts:\n");
+            eprintln!("{}", conflict.display_user_friendly(&solver));
+            process::exit(1);
+        }
         Err(_) => {
             eprintln!("No solution exists.");
             process::exit(1);
