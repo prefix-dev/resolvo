@@ -1,12 +1,12 @@
 use std::fmt::{self, Display};
 use std::process;
 
+use resolvo::utils::{Pool, VersionSet};
 use resolvo::{
     Candidates, Condition, ConditionId, ConditionalRequirement, Dependencies, DependencyProvider,
-    HintDependenciesAvailable, Interner, KnownDependencies, NameId, Problem, SolvableId,
-    Solver, SolverCache, StringId, VersionSetId, VersionSetUnionId,
+    HintDependenciesAvailable, Interner, KnownDependencies, NameId, Problem, SolvableId, Solver,
+    SolverCache, StringId, VersionSetId, VersionSetUnionId,
 };
-use resolvo::utils::{Pool, VersionSet};
 
 /// A set of digits 1-9 represented as a bitmask.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -45,15 +45,10 @@ impl VersionSet for DigitSet {
     type V = u8;
 }
 
-// ---- Task 2: SudokuProvider struct and Interner impl ----
-
 struct SudokuProvider {
     pool: Pool<DigitSet>,
-    /// Pre-filled digits indexed by cell (row * 9 + col). None = empty cell.
     givens: [Option<u8>; 81],
-    /// Solvable IDs indexed by (cell_index * 9 + (digit - 1))
     solvables: Vec<SolvableId>,
-    /// Name IDs for each cell, indexed by cell (row * 9 + col)
     names: Vec<NameId>,
 }
 
@@ -75,7 +70,12 @@ impl SudokuProvider {
             }
         }
 
-        Self { pool, givens, solvables, names }
+        Self {
+            pool,
+            givens,
+            solvables,
+            names,
+        }
     }
 
     fn solvable_id(&self, cell: usize, digit: u8) -> SolvableId {
@@ -138,8 +138,6 @@ impl Interner for SudokuProvider {
     }
 }
 
-// ---- Task 3: DependencyProvider impl ----
-
 impl SudokuProvider {
     /// Returns the indices of the 20 peer cells (same row, column, or box) for a given cell.
     fn peers(cell: usize) -> impl Iterator<Item = usize> {
@@ -150,7 +148,8 @@ impl SudokuProvider {
 
         let row_peers = (0..9).map(move |c| row * 9 + c);
         let col_peers = (0..9).map(move |r| r * 9 + col);
-        let box_peers = (0..3).flat_map(move |r| (0..3).map(move |c| (box_row + r) * 9 + box_col + c));
+        let box_peers =
+            (0..3).flat_map(move |r| (0..3).map(move |c| (box_row + r) * 9 + box_col + c));
 
         row_peers
             .chain(col_peers)
@@ -208,15 +207,7 @@ impl DependencyProvider for SudokuProvider {
         let mut constrains = Vec::new();
         for peer in Self::peers(cell) {
             let peer_name = self.names[peer];
-            let exclusion_set = DigitSet::singleton(digit);
-            // Constrain the peer to NOT contain this digit
-            // We want to express "peer != digit", so we use the complement:
-            // intern a version set for the peer that represents all digits except this one.
-            // The constrains field means: "if the peer is selected, it must satisfy this version set".
-            // Since DigitSet::singleton(digit) means "only digit", we need the inverse.
-            // We'll use a version set that contains everything except the given digit.
-            let mut allowed = DigitSet::all();
-            allowed.0 &= !exclusion_set.0;
+            let allowed = DigitSet(DigitSet::all().0 & !DigitSet::singleton(digit).0);
             let vs_id = self.pool.intern_version_set(peer_name, allowed);
             constrains.push(vs_id);
         }
@@ -227,8 +218,6 @@ impl DependencyProvider for SudokuProvider {
         })
     }
 }
-
-// ---- Task 4: Parsing and pretty-print output ----
 
 fn parse_puzzle(input: &str) -> Result<[Option<u8>; 81], String> {
     if input.len() != 81 {
@@ -271,7 +260,9 @@ fn main() {
             eprintln!("  Use '.' or '0' for empty cells, '1'-'9' for givens.");
             eprintln!();
             eprintln!("Example:");
-            eprintln!("  cargo run --example sudoku -- \"53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79\"");
+            eprintln!(
+                "  cargo run --example sudoku -- \"53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79\""
+            );
             process::exit(1);
         }
     };
@@ -286,7 +277,6 @@ fn main() {
 
     let provider = SudokuProvider::new(givens);
 
-    // Build requirements: each cell must have a digit assigned
     let requirements: Vec<ConditionalRequirement> = provider
         .names
         .iter()
