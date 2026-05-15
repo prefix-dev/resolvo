@@ -370,6 +370,15 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 .or_default()
                 .push((requirement.requirement, condition, clause_id));
 
+            // If the variable is already assigned true, add it to active_requires_parents
+            // so that decide() will consider its requirements
+            super::track_decision_for_requires(
+                variable,
+                self.state.decision_tracker.assigned_value(variable) == Some(true),
+                &self.state.requires_clauses,
+                &mut self.state.active_requires_parents,
+            );
+
             if conflict {
                 self.conflicting_clauses.push(clause_id);
             } else if no_candidates && condition.is_none() {
@@ -676,6 +685,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                                 self.level,
                             )
                             .expect("we checked that there is no value yet");
+                        super::track_decision_for_requires(
+                            literal.variable(),
+                            literal.satisfying_value(),
+                            &self.state.requires_clauses,
+                            &mut self.state.active_requires_parents,
+                        );
                     }
                 },
                 || {
@@ -749,6 +764,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                             self.level,
                         )
                         .expect("the at least one variable must be undecided");
+                    super::track_decision_for_requires(
+                        at_least_one_variable,
+                        true,
+                        &self.state.requires_clauses,
+                        &mut self.state.active_requires_parents,
+                    );
                 }
             }
 
