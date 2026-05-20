@@ -20,6 +20,7 @@ use crate::{
     internal::{
         arena::{Arena, ArenaId},
         id::{ClauseId, LearntClauseId, NameId, SolvableId, SolvableOrRootId, VariableId},
+        indexed_set::IndexedSet,
     },
     runtime::{AsyncRuntime, NowOrNeverRuntime},
     solver::binary_encoding::AtMostOnceTracker,
@@ -184,8 +185,8 @@ pub(crate) struct SolverState {
 
     disjunctions: Arena<DisjunctionId, Disjunction>,
 
-    clauses_added_for_package: HashSet<NameId>,
-    clauses_added_for_solvable: HashSet<SolvableOrRootId>,
+    clauses_added_for_package: IndexedSet<NameId>,
+    clauses_added_for_solvable: IndexedSet<SolvableOrRootId>,
     at_most_one_trackers: HashMap<NameId, AtMostOnceTracker<VariableId>>,
 
     /// Keeps track of auxiliary variables that are used to encode at-least-one
@@ -196,6 +197,63 @@ pub(crate) struct SolverState {
 
     /// Activity score per package.
     name_activity: Vec<f32>,
+
+    #[cfg(feature = "diagnostics")]
+    propagation_counters: PropagationCounters,
+}
+
+/// Counters that track propagation loop behavior for performance analysis.
+#[cfg(feature = "diagnostics")]
+#[derive(Default)]
+pub(crate) struct PropagationCounters {
+    pub decisions_propagated: u64,
+    /// Total number of clause visits during watch traversal.
+    pub clause_visits: u64,
+    /// Number of times other_watched was already true (early skip).
+    pub early_skips: u64,
+    /// Number of times we found a new unwatched literal (watch moved).
+    pub watch_moves: u64,
+    /// Number of times we had to unit-propagate (no unwatched literal found).
+    pub unit_propagations: u64,
+    /// Breakdown of [`Self::clause_visits`] by clause type.
+    pub visits_by_type: PropagationVisitsByType,
+    /// Breakdown of `next_unwatched_literal` calls by clause type.
+    pub unwatched_calls_by_type: PropagationVisitsByType,
+    pub propagate_calls: u64,
+    pub conflicts: u64,
+    /// Time spent adding clauses from the dependency provider.
+    pub encoding_duration: std::time::Duration,
+    pub propagation_duration: std::time::Duration,
+    pub decide_duration: std::time::Duration,
+    /// Time spent in [`Self::analyze`] / `learn_from_conflict`.
+    pub learn_duration: std::time::Duration,
+}
+
+#[cfg(feature = "diagnostics")]
+#[derive(Default)]
+pub(crate) struct PropagationVisitsByType {
+    pub requires: u64,
+    pub constrains: u64,
+    pub forbid_multiple: u64,
+    pub lock: u64,
+    pub learnt: u64,
+    pub any_of: u64,
+    pub other: u64,
+}
+
+#[cfg(feature = "diagnostics")]
+impl PropagationVisitsByType {
+    fn count(&mut self, clause: &Clause) {
+        match clause {
+            Clause::Requires(..) => self.requires += 1,
+            Clause::Constrains(..) => self.constrains += 1,
+            Clause::ForbidMultipleInstances(..) => self.forbid_multiple += 1,
+            Clause::Lock(..) => self.lock += 1,
+            Clause::Learnt(..) => self.learnt += 1,
+            Clause::AnyOf(..) => self.any_of += 1,
+            _ => self.other += 1,
+        }
+    }
 }
 
 impl<D: DependencyProvider> Solver<D, NowOrNeverRuntime> {
@@ -261,6 +319,11 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// Returns the dependency provider used by this instance.
     pub fn provider(&self) -> &D {
         self.cache.provider()
+    }
+
+    /// Returns the number of clauses in the solver after solving.
+    pub fn clause_count(&self) -> usize {
+        self.state.clauses.kinds.len()
     }
 
     /// Set the runtime of the solver to `runtime`.
@@ -331,7 +394,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         // this is indeed the case.
         let root_clause = {
             let (state, kind) = WatchedLiterals::root();
-            self.state.clauses.alloc(state, kind)
+            self.state.add_clause(state, kind)
         };
         assert_eq!(root_clause, ClauseId::install_root());
 
@@ -444,10 +507,16 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     .expect("already decided");
 
                 // Add the clauses for the root solvable.
+                #[cfg(feature = "diagnostics")]
+                let encoding_start = std::time::Instant::now();
                 let conflicting_clauses = self.async_runtime.block_on(
                     Encoder::new(&mut self.state, &self.cache, root_deps, level)
                         .encode([root_solvable]),
                 )?;
+                #[cfg(feature = "diagnostics")]
+                {
+                    self.state.propagation_counters.encoding_duration += encoding_start.elapsed();
+                }
 
                 if let Some(clause_id) = conflicting_clauses.into_iter().next() {
                     return self.run_sat_process_unsolvable(
@@ -522,7 +591,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     !self
                         .state
                         .clauses_added_for_solvable
-                        .contains(&solvable_or_root)
+                        .contains(solvable_or_root)
                 })
                 .map(|d| (d.variable, d.derived_from))
                 .collect();
@@ -563,9 +632,15 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 })
                 .collect::<Vec<_>>();
 
+            #[cfg(feature = "diagnostics")]
+            let encoding_start = std::time::Instant::now();
             let conflicting_clauses = self.async_runtime.block_on(
                 Encoder::new(&mut self.state, &self.cache, root_deps, level).encode(new_solvables),
             )?;
+            #[cfg(feature = "diagnostics")]
+            {
+                self.state.propagation_counters.encoding_duration += encoding_start.elapsed();
+            }
 
             // Serially process the outputs, to reduce the need for synchronization
             for &clause_id in &conflicting_clauses {
@@ -639,9 +714,19 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         loop {
             // Make a decision. If no decision could be made it means the problem is
             // satisfyable.
+            #[cfg(feature = "diagnostics")]
+            let decide_start = std::time::Instant::now();
             let Some((candidate, required_by, clause_id)) = self.decide() else {
+                #[cfg(feature = "diagnostics")]
+                {
+                    self.state.propagation_counters.decide_duration += decide_start.elapsed();
+                }
                 break;
             };
+            #[cfg(feature = "diagnostics")]
+            {
+                self.state.propagation_counters.decide_duration += decide_start.elapsed();
+            }
 
             tracing::debug!(
                 "╒══ Install {} at level {level} (derived from {})",
@@ -962,6 +1047,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         attempted_value: bool,
         conflicting_clause: ClauseId,
     ) -> Result<u32, Conflict> {
+        #[cfg(feature = "diagnostics")]
+        let learn_start = std::time::Instant::now();
         {
             tracing::debug!(
                 "├┬ Propagation conflicted: could not set {solvable} to {attempted_value}",
@@ -1008,6 +1095,10 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 );
             }
 
+            #[cfg(feature = "diagnostics")]
+            {
+                self.state.propagation_counters.learn_duration += learn_start.elapsed();
+            }
             return Err(self.analyze_unsolvable(conflicting_clause));
         }
 
@@ -1035,6 +1126,11 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
 
         tracing::debug!("│└ Backtracked from {old_level} -> {level}");
 
+        #[cfg(feature = "diagnostics")]
+        {
+            self.state.propagation_counters.learn_duration += learn_start.elapsed();
+        }
+
         Ok(level)
     }
 
@@ -1048,6 +1144,24 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// solvable has become false, in which case it picks a new solvable to
     /// watch (if available) or triggers an assignment.
     fn propagate(&mut self, level: u32) -> Result<(), PropagationError> {
+        #[cfg(feature = "diagnostics")]
+        let propagation_start = std::time::Instant::now();
+        #[cfg(feature = "diagnostics")]
+        {
+            self.state.propagation_counters.propagate_calls += 1;
+        }
+
+        let result = self.propagate_impl(level);
+
+        #[cfg(feature = "diagnostics")]
+        {
+            self.state.propagation_counters.propagation_duration += propagation_start.elapsed();
+        }
+
+        result
+    }
+
+    fn propagate_impl(&mut self, level: u32) -> Result<(), PropagationError> {
         if let Some(value) = self.provider().should_cancel_with_value() {
             return Err(PropagationError::Cancelled(value));
         };
@@ -1075,13 +1189,18 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         while let Some(decision) = self.state.decision_tracker.next_unpropagated() {
             let watched_literal = Literal::new(decision.variable, decision.value);
 
+            #[cfg(feature = "diagnostics")]
+            {
+                self.state.propagation_counters.decisions_propagated += 1;
+            }
+
             debug_assert!(
                 watched_literal.eval(self.state.decision_tracker.map()) == Some(false),
                 "we are only watching literals that are turning false"
             );
 
-            // Propagate, iterating through the linked list of clauses that watch this
-            // solvable
+            // Propagate, iterating through the linked list of clauses that
+            // watch this solvable.
             let mut next_cursor = self
                 .state
                 .watches
@@ -1091,25 +1210,56 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 let clause = &clause_kinds[clause_id.to_usize()];
                 let watch_index = cursor.watch_index();
 
+                #[cfg(feature = "diagnostics")]
+                {
+                    self.state.propagation_counters.clause_visits += 1;
+                    self.state.propagation_counters.visits_by_type.count(clause);
+                }
+
                 // If the other literal the current clause is watching is already true, we can
                 // skip this clause. Its is already satisfied.
                 let watched_literals = cursor.watched_literals();
                 let other_watched_literal =
                     watched_literals.watched_literals[1 - cursor.watch_index()];
                 if other_watched_literal.eval(self.state.decision_tracker.map()) == Some(true) {
+                    #[cfg(feature = "diagnostics")]
+                    {
+                        self.state.propagation_counters.early_skips += 1;
+                    }
                     // Continue with the next clause in the linked list.
                     next_cursor = cursor.next();
-                } else if let Some(literal) = watched_literals.next_unwatched_literal(
-                    clause,
-                    &self.state.learnt_clauses,
-                    &self.state.requirement_to_sorted_candidates,
-                    &self.state.disjunctions,
-                    self.state.decision_tracker.map(),
-                    watch_index,
-                ) {
+                } else if let Some(literal) = if clause.is_binary() {
+                    // Binary clauses can never move their watches; skip the
+                    // `next_unwatched_literal` scan entirely.
+                    None
+                } else {
+                    #[cfg(feature = "diagnostics")]
+                    {
+                        self.state
+                            .propagation_counters
+                            .unwatched_calls_by_type
+                            .count(clause);
+                    }
+                    watched_literals.next_unwatched_literal(
+                        clause,
+                        &self.state.learnt_clauses,
+                        &self.state.requirement_to_sorted_candidates,
+                        &self.state.disjunctions,
+                        self.state.decision_tracker.map(),
+                        watch_index,
+                    )
+                } {
+                    #[cfg(feature = "diagnostics")]
+                    {
+                        self.state.propagation_counters.watch_moves += 1;
+                    }
                     // Update the watch to point to the new literal
                     next_cursor = cursor.update(literal);
                 } else {
+                    #[cfg(feature = "diagnostics")]
+                    {
+                        self.state.propagation_counters.unit_propagations += 1;
+                    }
                     // We could not find another literal to watch, which means the remaining
                     // watched literal must be set to true.
                     let decided = self
@@ -1124,6 +1274,10 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                             level,
                         )
                         .map_err(|_| {
+                            #[cfg(feature = "diagnostics")]
+                            {
+                                self.state.propagation_counters.conflicts += 1;
+                            }
                             PropagationError::Conflict(
                                 other_watched_literal.variable(),
                                 true,
@@ -1232,7 +1386,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         learnt_why: &Mapping<LearntClauseId, Vec<ClauseId>>,
         clause_id: ClauseId,
         conflict: &mut Conflict,
-        seen: &mut HashSet<ClauseId>,
+        seen: &mut IndexedSet<ClauseId>,
     ) {
         let clause = &clauses[clause_id.to_usize()];
         match clause {
@@ -1273,7 +1427,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             },
         );
 
-        let mut seen = HashSet::default();
+        let mut seen = IndexedSet::default();
         Self::analyze_unsolvable_clause(
             &self.state.clauses.kinds,
             &self.state.learnt_why,
@@ -1430,15 +1584,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         self.state.learnt_why.insert(learnt_id, learnt_why);
 
         let (watched_literals, kind) = WatchedLiterals::learnt(learnt_id, &learnt);
-        let clause_id = self.state.clauses.alloc(watched_literals, kind);
+        let clause_id = self.state.add_clause(watched_literals, kind);
         self.state.learnt_clause_ids.push(clause_id);
-        if let Some(watched_literals) =
-            self.state.clauses.watched_literals[clause_id.to_usize()].as_mut()
-        {
-            self.state
-                .watches
-                .start_watching(watched_literals, clause_id);
-        }
 
         tracing::debug!("│├ Learnt disjunction:",);
         for lit in learnt {
@@ -1469,6 +1616,23 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
 }
 
 impl SolverState {
+    /// Allocate a clause and, if it has watched literals, register them in
+    /// the [`WatchMap`].
+    pub(crate) fn add_clause(
+        &mut self,
+        watched_literals: Option<WatchedLiterals>,
+        kind: Clause,
+    ) -> ClauseId {
+        let clause_id = self.clauses.alloc(watched_literals, kind);
+        let Some(wl) = self.clauses.watched_literals[clause_id.to_usize()].as_mut() else {
+            return clause_id;
+        };
+
+        self.watches.start_watching(wl, clause_id);
+
+        clause_id
+    }
+
     /// Returns the solvables that the solver has chosen to include in the
     /// solution so far.
     fn chosen_solvables(&self) -> impl Iterator<Item = SolvableId> + '_ {

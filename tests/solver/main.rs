@@ -1069,3 +1069,259 @@ fn solve_for_snapshot<D: DependencyProvider>(
         Err(UnsolvableOrCancelled::Cancelled(reason)) => *reason.downcast().unwrap(),
     }
 }
+
+// ============================================================================
+// Constraint edge case tests
+// ============================================================================
+// These tests comprehensively cover the behavior of Constrains clauses
+// (i.e. "if A is installed, B must NOT be installed") in both directions
+// and various edge cases involving backtracking.
+
+/// Forward direction: parent is installed, its constraint forbids certain versions
+/// of another package. The solver should pick a compatible version.
+/// Constraint spec "b 3..100" means b must be in [3,100). Versions outside that range are forbidden.
+#[test]
+fn test_constrains_forward_basic() {
+    let mut provider = BundleBoxProvider::new();
+    // a requires b and constrains b to >= 3 (forbids b=1, b=2)
+    provider.add_package("a", 1.into(), &["b"], &["b 3..100"]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &[]);
+    provider.add_package("b", 3.into(), &[], &[]);
+    provider.add_package("b", 4.into(), &[], &[]);
+
+    let requirements = provider.requirements(&["a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // b=4 is the highest version in the allowed range [3,100)
+    assert_snapshot!(result, @r###"
+    a=1
+    b=4
+    "###);
+}
+
+/// Forward direction: parent constrains away ALL versions of a dependency
+/// by specifying an empty allowed range.
+#[test]
+fn test_constrains_forward_all_forbidden() {
+    let mut provider = BundleBoxProvider::new();
+    // a requires b but its constraint of [100,200) excludes every available version
+    provider.add_package("a", 1.into(), &["b"], &["b 100..200"]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &[]);
+
+    let error = solve_unsat(provider, &["a"]);
+    assert_snapshot!(error);
+}
+
+/// Reverse direction: b=2 is forced by `x`, then `a=3` which constrains b
+/// to >= 3 can't be used (b=2 is outside [3,100)), so solver falls back to `a=2`.
+#[test]
+fn test_constrains_reverse_direction() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("x", 1.into(), &["b 2..3"], &[]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &[]);
+    provider.add_package("b", 3.into(), &[], &[]);
+    provider.add_package("a", 2.into(), &[], &[]);
+    // a=3 constrains b to [3,100), so b=1 and b=2 are forbidden
+    provider.add_package("a", 3.into(), &[], &["b 3..100"]);
+
+    let requirements = provider.requirements(&["x", "a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // b=2 forced by x, a=3 incompatible, falls back to a=2
+    assert_snapshot!(result, @r###"
+    a=2
+    b=2
+    x=1
+    "###);
+}
+
+/// Reverse direction unsolvable: forced version conflicts with only parent version.
+#[test]
+fn test_constrains_reverse_unsat() {
+    let mut provider = BundleBoxProvider::new();
+    // x forces b=1
+    provider.add_package("x", 1.into(), &["b 1..2"], &[]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &[]);
+    // a constrains b to [2,100), so b=1 is forbidden
+    provider.add_package("a", 1.into(), &[], &["b 2..100"]);
+
+    let error = solve_unsat(provider, &["x", "a"]);
+    assert_snapshot!(error);
+}
+
+/// Constraint with no version of constrained package selected.
+/// The constraint should have no effect since the package isn't needed.
+#[test]
+fn test_constrains_no_version_selected() {
+    let mut provider = BundleBoxProvider::new();
+    // a constrains b to [100,200), forbidding all existing b versions
+    // but nothing requires b, so constraint is irrelevant
+    provider.add_package("a", 1.into(), &[], &["b 100..200"]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &[]);
+
+    let requirements = provider.requirements(&["a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r###"
+    a=1
+    "###);
+}
+
+/// Matching version selected: the constraint allows the selected version.
+#[test]
+fn test_constrains_matching_version_ok() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("x", 1.into(), &["b"], &[]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &[]);
+    provider.add_package("b", 3.into(), &[], &[]);
+    // a constrains b to [0,2), allowing b=1 and forbidding b=2 and b=3
+    provider.add_package("a", 1.into(), &[], &["b 0..2"]);
+
+    let requirements = provider.requirements(&["x", "a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // b=1 is the only version in the allowed range
+    assert_snapshot!(result, @r###"
+    a=1
+    b=1
+    x=1
+    "###);
+}
+
+/// Backtracking through constraints: solver tries b=3 first, backtracks to b=1.
+#[test]
+fn test_constrains_backtracking() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("a", 1.into(), &["b"], &[]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &[]);
+    provider.add_package("b", 3.into(), &[], &[]);
+    // c constrains b to [0,2), allowing b=1 and forbidding b=2 and b=3
+    provider.add_package("c", 1.into(), &[], &["b 0..2"]);
+
+    let requirements = provider.requirements(&["a", "c"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r###"
+    a=1
+    b=1
+    c=1
+    "###);
+}
+
+/// Diamond dependency with constraints on both sides.
+#[test]
+fn test_constrains_diamond() {
+    let mut provider = BundleBoxProvider::new();
+    // a requires c and constrains c to [3,100), forbidding c=1 and c=2
+    provider.add_package("a", 1.into(), &["c"], &["c 3..100"]);
+    // b requires c and constrains c to [0,5), forbidding c=5
+    provider.add_package("b", 1.into(), &["c"], &["c 0..5"]);
+    provider.add_package("c", 1.into(), &[], &[]);
+    provider.add_package("c", 2.into(), &[], &[]);
+    provider.add_package("c", 3.into(), &[], &[]);
+    provider.add_package("c", 4.into(), &[], &[]);
+    provider.add_package("c", 5.into(), &[], &[]);
+
+    let requirements = provider.requirements(&["a", "b"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // c must be in [3,5) -> c=3 or c=4, highest wins
+    assert_snapshot!(result, @r###"
+    a=1
+    b=1
+    c=4
+    "###);
+}
+
+/// Stress test: many versions with constraints.
+#[test]
+fn test_constrains_many_versions() {
+    let mut provider = BundleBoxProvider::new();
+    for v in 1..=50u32 {
+        provider.add_package("big", v.into(), &[], &[]);
+    }
+    // a requires big and constrains it to [46,100), allowing 46-50 and forbidding 1-45
+    provider.add_package("a", 1.into(), &["big"], &["big 46..100"]);
+
+    let requirements = provider.requirements(&["a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r###"
+    a=1
+    big=50
+    "###);
+}
+
+/// Transitive constraint: a constrains b, which transitively affects c.
+#[test]
+fn test_constrains_transitive() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("b", 1.into(), &["c 1..2"], &[]);
+    provider.add_package("b", 2.into(), &["c 2..3"], &[]);
+    provider.add_package("c", 1.into(), &[], &[]);
+    provider.add_package("c", 2.into(), &[], &[]);
+    provider.add_package("x", 1.into(), &["b"], &[]);
+    // a constrains b to [2,100), so b=1 is forbidden
+    provider.add_package("a", 1.into(), &[], &["b 2..100"]);
+
+    let requirements = provider.requirements(&["x", "a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // a forbids b=1, so b=2 is selected, which requires c=2
+    assert_snapshot!(result, @r###"
+    a=1
+    b=2
+    c=2
+    x=1
+    "###);
+}
+
+/// Multiple constraints from different parents on the same package.
+#[test]
+fn test_constrains_multiple_parents() {
+    let mut provider = BundleBoxProvider::new();
+    for v in 1..=8u32 {
+        provider.add_package("pkg", v.into(), &[], &[]);
+    }
+    provider.add_package("x", 1.into(), &["pkg"], &[]);
+    // a constrains pkg to [3,100), forbidding pkg=1 and pkg=2
+    provider.add_package("a", 1.into(), &[], &["pkg 3..100"]);
+    // b constrains pkg to [0,8), forbidding pkg=8
+    provider.add_package("b", 1.into(), &[], &["pkg 0..8"]);
+
+    let requirements = provider.requirements(&["x", "a", "b"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // pkg must be in [3,8) -> 3..7, highest = 7
+    assert_snapshot!(result, @r###"
+    a=1
+    b=1
+    pkg=7
+    x=1
+    "###);
+}

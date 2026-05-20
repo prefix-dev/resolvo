@@ -36,6 +36,10 @@ struct Opts {
     /// The random seed to use for generating the requirements.
     #[clap(long, default_value = "0")]
     seed: u64,
+
+    /// Enable tracing output (set RUST_LOG for verbosity, e.g. RUST_LOG=info)
+    #[clap(long)]
+    tracing: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -48,6 +52,13 @@ struct Record {
 
 fn main() {
     let opts: Opts = Opts::parse();
+
+    if opts.tracing {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .init();
+    }
 
     eprintln!("Loading snapshot ...");
     let snapshot_file = BufReader::new(File::open(opts.snapshot).unwrap());

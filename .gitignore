@@ -26,3 +26,6 @@ output/
 # Any resolvo snapshots in the root
 snapshot-*.json
 snapshot_*.json
+bench-final/
+
+timings_*

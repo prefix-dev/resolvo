@@ -109,6 +109,22 @@ pub(crate) enum Clause {
 }
 
 impl Clause {
+    /// Returns `true` if the clause has exactly two literals that can never
+    /// change. The propagation loop relies on this to skip the
+    /// `next_unwatched_literal` scan, which can never succeed for such
+    /// clauses.
+    pub fn is_binary(&self) -> bool {
+        matches!(
+            self,
+            Clause::Constrains(..)
+                | Clause::ForbidMultipleInstances(..)
+                | Clause::Lock(..)
+                | Clause::AnyOf(..)
+        )
+    }
+}
+
+impl Clause {
     /// Returns the building blocks needed for a new [WatchedLiterals] of the
     /// [Clause::Requires] kind.
     ///
@@ -491,10 +507,7 @@ impl WatchedLiterals {
         match clause {
             Clause::InstallRoot => unreachable!(),
             Clause::Excluded(_, _) => unreachable!(),
-            Clause::Constrains(..) | Clause::ForbidMultipleInstances(..) | Clause::Lock(..) => {
-                // We cannot move the watches in these clauses.
-                None
-            }
+            _ if clause.is_binary() => None,
             clause => {
                 let next = clause.try_fold_literals(
                     learnt_clauses,
@@ -882,6 +895,44 @@ mod test {
         assert_eq!(
             std::mem::size_of::<Option<WatchedLiterals>>(),
             std::mem::size_of::<WatchedLiterals>()
+        );
+    }
+
+    #[test]
+    fn test_clause_size() {
+        // The Clause enum should be kept small since we create thousands of instances.
+        // Asserted exactly to catch both growth (worse cache) and silent shrinkage
+        // (which would mean a variant got smaller and the bound is now loose).
+        assert_eq!(std::mem::size_of::<Clause>(), 16);
+    }
+
+    #[test]
+    fn test_key_type_sizes() {
+        use crate::internal::id::*;
+        eprintln!("=== Key type sizes ===");
+        eprintln!("VariableId: {} bytes", std::mem::size_of::<VariableId>());
+        eprintln!("ClauseId: {} bytes", std::mem::size_of::<ClauseId>());
+        eprintln!(
+            "Option<ClauseId>: {} bytes",
+            std::mem::size_of::<Option<ClauseId>>()
+        );
+        eprintln!("SolvableId: {} bytes", std::mem::size_of::<SolvableId>());
+        eprintln!("NameId: {} bytes", std::mem::size_of::<NameId>());
+        eprintln!(
+            "Requirement: {} bytes",
+            std::mem::size_of::<crate::Requirement>()
+        );
+        eprintln!(
+            "Decision: {} bytes",
+            std::mem::size_of::<super::super::decision::Decision>()
+        );
+        eprintln!(
+            "DecisionAndLevel (in DecisionMap): {} bytes",
+            std::mem::size_of::<i32>()
+        );
+        eprintln!(
+            "Clause + WatchedLiterals per clause: {} bytes",
+            std::mem::size_of::<Clause>() + std::mem::size_of::<Option<WatchedLiterals>>()
         );
     }
 }

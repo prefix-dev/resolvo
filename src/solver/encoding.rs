@@ -1,4 +1,4 @@
-use std::{any::Any, future::ready};
+use std::{any::Any, collections::VecDeque, future::ready};
 
 use futures::{
     FutureExt, StreamExt, TryFutureExt, future::LocalBoxFuture, stream::FuturesUnordered,
@@ -12,6 +12,7 @@ use crate::{
     internal::{
         arena::ArenaId,
         id::{ClauseId, SolvableOrRootId, VariableId},
+        indexed_set::IndexedSet,
     },
     solver::{conditions::Disjunction, decision::Decision},
 };
@@ -46,8 +47,18 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     /// Stores for which packages and solvables we want to add forbid clauses.
     pending_forbid_clauses: IndexMap<NameId, Vec<VariableId>, ahash::RandomState>,
 
+    /// Tracks which variables have already been added to
+    /// `pending_forbid_clauses` to avoid accumulating millions of duplicate
+    /// entries. A variable belongs to exactly one package, so deduplicating
+    /// globally is safe.
+    forbid_seen: IndexedSet<VariableId>,
+
     /// A set of packages that should have an at-least-once tracker.
     new_at_least_one_packages: IndexMap<NameId, VariableId, ahash::RandomState>,
+
+    /// Results from futures that completed immediately during
+    /// `try_immediate_or_queue`.
+    pending_results: VecDeque<Result<TaskResult<'cache>, Box<dyn Any>>>,
 }
 
 /// The result of a future that was queued for processing.
@@ -105,8 +116,33 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             pending_futures: FuturesUnordered::new(),
             conflicting_clauses: Vec::new(),
             pending_forbid_clauses: IndexMap::default(),
+            forbid_seen: IndexedSet::default(),
             level,
             new_at_least_one_packages: IndexMap::default(),
+            pending_results: VecDeque::new(),
+        }
+    }
+
+    /// Poll `future` once on the stack. If it resolves immediately (as all
+    /// futures do under [`NowOrNeverRuntime`]), record the result for
+    /// iterative processing; otherwise hand the boxed future off to
+    /// [`Self::pending_futures`] for later polling.
+    ///
+    /// We still box the future, so the allocation cost is the same. The
+    /// win over pushing straight to `FuturesUnordered` is avoiding its slab
+    /// and waker bookkeeping.
+    fn queue_future<F>(&mut self, future: F)
+    where
+        F: std::future::Future<Output = Result<TaskResult<'cache>, Box<dyn Any>>> + 'cache,
+    {
+        let mut boxed = future.boxed_local();
+        match boxed.as_mut().now_or_never() {
+            Some(result) => self.pending_results.push_back(result),
+            None => {
+                // Future is still pending. Hand the boxed future to
+                // `pending_futures` so it can be polled asynchronously.
+                self.pending_futures.push(boxed);
+            }
         }
     }
 
@@ -120,8 +156,19 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             self.queue_solvable(solvable_id);
         }
 
-        // Process all pending futures until there are no more.
-        while let Some(future_result) = self.pending_futures.next().await {
+        // Process pending work until none remains. Immediately completed
+        // futures are drained iteratively rather than recursing through
+        // on_task_result -> queue_* -> on_task_result. Each loop iteration
+        // drains synchronously-ready results first, then awaits the next
+        // truly-async future, so the trailing drain on stream exhaustion
+        // happens naturally on the next iteration.
+        loop {
+            while let Some(result) = self.pending_results.pop_front() {
+                self.on_task_result(result?);
+            }
+            let Some(future_result) = self.pending_futures.next().await else {
+                break;
+            };
             self.on_task_result(future_result?);
         }
 
@@ -272,15 +319,22 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             })
         {
             let name_id = self.cache.provider().solvable_name(solvable);
-            self.pending_forbid_clauses
-                .entry(name_id)
-                .or_default()
-                .push(variable_id);
+            self.register_forbid_target(name_id, variable_id);
         }
 
         // Queue requesting the dependencies of the candidates as well if they are
         // cheaply available from the dependency provider.
         for &candidate in candidates.iter().flat_map(|solvables| solvables.iter()) {
+            // Pre-check before `queue_solvable` does the same: skips the
+            // `are_dependencies_available_for` query and the async closure
+            // setup on the hot duplicate path.
+            if self
+                .state
+                .clauses_added_for_solvable
+                .contains(SolvableOrRootId::from(candidate))
+            {
+                continue;
+            }
             // If the dependencies are already available for the
             // candidate, queue the candidate for processing.
             if self.cache.are_dependencies_available_for(candidate) {
@@ -297,14 +351,11 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     match disjunction_complement {
                         DisjunctionComplement::Solvables(version_set, solvables) => {
                             let name_id = self.cache.provider().version_set_name(version_set);
-                            let pending_forbid_clauses =
-                                self.pending_forbid_clauses.entry(name_id).or_default();
                             disjunction_literals.reserve(solvables.len());
-                            pending_forbid_clauses.reserve(solvables.len());
                             for &solvable in solvables {
                                 let variable = self.state.variable_map.intern_solvable(solvable);
                                 disjunction_literals.push(variable.positive());
-                                pending_forbid_clauses.push(variable);
+                                self.register_forbid_target(name_id, variable);
                             }
                         }
                         DisjunctionComplement::Empty(version_set) => {
@@ -353,16 +404,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 condition.zip(condition_literals),
                 &self.state.decision_tracker,
             );
-            let clause_id = self.state.clauses.alloc(watched_literals, kind);
-
-            let watched_literals =
-                self.state.clauses.watched_literals[clause_id.to_usize()].as_mut();
-
-            if let Some(watched_literals) = watched_literals {
-                self.state
-                    .watches
-                    .start_watching(watched_literals, clause_id);
-            }
+            let clause_id = self.state.add_clause(watched_literals, kind);
 
             self.state
                 .requires_clauses
@@ -412,18 +454,8 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 &self.state.decision_tracker,
             );
 
-            // Allocate the clause for the constraint
-            let clause_id = self.state.clauses.alloc(watched_literals, kind);
+            let clause_id = self.state.add_clause(watched_literals, kind);
 
-            // Start watching the clause
-            let watched_literals = self.state.clauses.watched_literals[clause_id.to_usize()]
-                .as_mut()
-                .expect("a forbid clause must always have watched literals");
-            self.state
-                .watches
-                .start_watching(watched_literals, clause_id);
-
-            // Mark conflicting clauses
             if conflict {
                 self.conflicting_clauses.push(clause_id);
             }
@@ -448,15 +480,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             // Allocated the clause for the exclusion
             let (watched_literals, kind) =
                 WatchedLiterals::lock(locked_solvable_var, other_candidate_var);
-            let clause_id = self.state.clauses.alloc(watched_literals, kind);
-
-            // Start watching the clause.
-            let watched_literals = self.state.clauses.watched_literals[clause_id.to_usize()]
-                .as_mut()
-                .expect("a forbid clause must always have watched literals");
-            self.state
-                .watches
-                .start_watching(watched_literals, clause_id);
+            self.state.add_clause(watched_literals, kind);
         }
     }
 
@@ -470,7 +494,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
         // Allocate a clause for the exclusion
         let (watched_literals, kind) = WatchedLiterals::exclude(variable, reason);
-        let clause_id = self.state.clauses.alloc(watched_literals, kind);
+        let clause_id = self.state.add_clause(watched_literals, kind);
 
         // Exclusions are negative assertions, tracked outside the watcher
         self.state.negative_assertions.push((variable, clause_id));
@@ -496,10 +520,9 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             return;
         }
 
-        // Construct a future that queries the dependencies for the solvable
         let cache = self.cache;
         let root_dependencies = self.root_dependencies;
-        let query_dependencies = async move {
+        self.queue_future(async move {
             let dependencies = match solvable_id.solvable() {
                 None => root_dependencies,
                 Some(solvable_id) => cache.get_or_cache_dependencies(solvable_id).await?,
@@ -508,10 +531,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 solvable_id,
                 dependencies,
             }))
-        };
-
-        // Queue the future for processing
-        self.pending_futures.push(query_dependencies.boxed_local());
+        });
     }
 
     /// Enqueues retrieving all candidates for a particular package name.
@@ -521,18 +541,14 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             return;
         }
 
-        // Construct a future that queries the candidates for the package
         let cache = self.cache;
-        let query_candidates = async move {
+        self.queue_future(async move {
             let package_candidates = cache.get_or_cache_candidates(name_id).await?;
             Ok(TaskResult::Candidates(CandidatesAvailable {
                 name_id,
                 package_candidates,
             }))
-        };
-
-        // Queue the future for processing
-        self.pending_futures.push(query_candidates.boxed_local());
+        });
     }
 
     /// Enqueues retrieving the candidates for a particular requirement. These
@@ -543,7 +559,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         requirement: ConditionalRequirement,
     ) {
         let cache = self.cache;
-        let query_requirements_candidates = async move {
+        self.queue_future(async move {
             let candidates = futures::future::try_join_all(
                 requirement
                     .requirement
@@ -589,17 +605,14 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     condition,
                 },
             ))
-        };
-
-        self.pending_futures
-            .push(query_requirements_candidates.boxed_local());
+        });
     }
 
     /// Enqueues retrieving the candidates for a particular constraint. These
     /// are the candidates that do *not* match the version set.
     fn queue_constraint(&mut self, solvable_id: SolvableOrRootId, constraint: VersionSetId) {
         let cache = self.cache;
-        let query_constraints_candidates = async move {
+        self.queue_future(async move {
             let non_matching_candidates = cache
                 .get_or_cache_non_matching_candidates(constraint)
                 .await?;
@@ -610,10 +623,19 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     candidates: non_matching_candidates,
                 },
             ))
-        };
+        });
+    }
 
-        self.pending_futures
-            .push(query_constraints_candidates.boxed_local());
+    /// Record `variable` as a candidate for a forbid-multiple clause under
+    /// `name_id`. Returns silently if the variable has already been registered;
+    /// see [`Self::forbid_seen`] for why globally-deduplicating is safe.
+    fn register_forbid_target(&mut self, name_id: NameId, variable: VariableId) {
+        if self.forbid_seen.insert(variable) {
+            self.pending_forbid_clauses
+                .entry(name_id)
+                .or_default()
+                .push(variable);
+        }
     }
 
     /// Add forbid clauses for solvables that we discovered as reachable from a
@@ -643,14 +665,15 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     let literal_a = a.negative();
                     let (watched_literals, kind) =
                         WatchedLiterals::forbid_multiple(a, literal_b, name_id);
+                    // Inlined `add_clause`: `other_solvables` (above) holds a
+                    // mutable borrow of `at_most_one_trackers`, so we cannot
+                    // call `self.state.add_clause(..)` here.
                     let clause_id = self.state.clauses.alloc(watched_literals, kind);
-                    let watched_literals = self.state.clauses.watched_literals
-                        [clause_id.to_usize()]
-                    .as_mut()
-                    .expect("forbid clause must have watched literals");
-                    self.state
-                        .watches
-                        .start_watching(watched_literals, clause_id);
+                    if let Some(wl) =
+                        self.state.clauses.watched_literals[clause_id.to_usize()].as_mut()
+                    {
+                        self.state.watches.start_watching(wl, clause_id);
+                    }
 
                     // Add a decision if a decision has already been made for one of the literals.
                     let set_literal = match (
@@ -690,14 +713,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 {
                     let (watched_literals, kind) =
                         WatchedLiterals::any_of(at_least_one_variable, candidate_var);
-                    let clause_id = self.state.clauses.alloc(watched_literals, kind);
-                    let watched_literals = self.state.clauses.watched_literals
-                        [clause_id.to_usize()]
-                    .as_mut()
-                    .expect("forbid clause must have watched literals");
-                    self.state
-                        .watches
-                        .start_watching(watched_literals, clause_id);
+                    self.state.add_clause(watched_literals, kind);
                 }
             }
         }
@@ -722,23 +738,20 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         for (name_id, at_least_one_variable) in self.new_at_least_one_packages.drain(..) {
             // Find the at-most-one tracker for the package. We want to reuse the same
             // variables.
-            let variables = self
+            // Collect variable IDs to avoid borrowing at_most_one_trackers
+            // across the mutable add_clause call.
+            let variables: Vec<_> = self
                 .state
                 .at_most_one_trackers
                 .get(&name_id)
-                .map(|tracker| &tracker.variables);
+                .map(|tracker| tracker.variables.iter().copied().collect())
+                .unwrap_or_default();
 
             // Add clauses for the existing variables.
-            for &helper_var in variables.into_iter().flatten() {
+            for helper_var in variables {
                 let (watched_literals, kind) =
                     WatchedLiterals::any_of(at_least_one_variable, helper_var);
-                let clause_id = self.state.clauses.alloc(watched_literals, kind);
-                let watched_literals = self.state.clauses.watched_literals[clause_id.to_usize()]
-                    .as_mut()
-                    .expect("forbid clause must have watched literals");
-                self.state
-                    .watches
-                    .start_watching(watched_literals, clause_id);
+                let clause_id = self.state.add_clause(watched_literals, kind);
 
                 // Assign true if any of the variables is true.
                 if self.state.decision_tracker.assigned_value(helper_var) == Some(true) {
