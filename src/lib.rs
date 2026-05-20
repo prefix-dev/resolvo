@@ -35,7 +35,7 @@ use itertools::Itertools;
 pub use requirement::Requirement;
 pub use solver::{
     Problem, Solver, SolverCache, UnsolvableOrCancelled,
-    variable_map::{DenseSolvableMap, SolvableMap, SparseSolvableMap},
+    variable_map::{DenseSolvableStorage, SolvableStorage, SparseSolvableStorage},
 };
 pub use utils::{Mapping, MappingIter};
 
@@ -121,14 +121,14 @@ pub trait Interner {
 #[allow(async_fn_in_trait)]
 pub trait DependencyProvider: Sized + Interner {
     /// Controls the data structure used to map `SolvableId`s to solver
-    /// variables. Use [`DenseSolvableMap`] when IDs are sequential from 0 (the
-    /// common case with a single pool), or [`SparseSolvableMap`] when the pool
+    /// variables. Use [`DenseSolvableStorage`] when IDs are sequential from 0 (the
+    /// common case with a single pool), or [`SparseSolvableStorage`] when the pool
     /// is large but only a fraction of solvables are visited during solving.
     // NOTE: once `generic_const_exprs` stabilizes, this could become
     // `const DENSE_SOLVABLE_IDS: bool = false;` — providers would just set a
     // bool instead of importing a type, and the solver would use
     // `SolverState<{ D::DENSE_SOLVABLE_IDS }>` internally.
-    type SolvableMap: SolvableMap;
+    type SolvableStorage: SolvableStorage;
 
     /// Given a set of solvables, return the candidates that match the given
     /// version set or if `inverse` is true, the candidates that do *not* match

@@ -13,12 +13,12 @@ use crate::{
 /// Trait abstracting over the solvable-to-variable mapping strategy.
 ///
 /// Two implementations are provided:
-/// - [`DenseSolvableMap`]: `Vec`-based, O(1) lookup. Best when `SolvableId`s are
+/// - [`DenseSolvableStorage`]: `Vec`-based, O(1) lookup. Best when `SolvableId`s are
 ///   allocated sequentially from 0 with no gaps.
-/// - [`SparseSolvableMap`]: `HashMap`-based. Only stores entries for solvables
+/// - [`SparseSolvableStorage`]: `HashMap`-based. Only stores entries for solvables
 ///   the solver has visited, efficient when the pool is large but few solvables
 ///   are touched.
-pub trait SolvableMap: Default {
+pub trait SolvableStorage: Default {
     /// Look up the variable assigned to the given solvable, if any.
     fn get(&self, id: SolvableId) -> Option<VariableId>;
     /// Record the mapping from a solvable to its solver variable.
@@ -32,9 +32,9 @@ pub trait SolvableMap: Default {
 /// Best when `SolvableId`s are dense and sequential (allocated from a single
 /// pool starting at 0).
 #[derive(Default)]
-pub struct DenseSolvableMap(Vec<Option<VariableId>>);
+pub struct DenseSolvableStorage(Vec<Option<VariableId>>);
 
-impl SolvableMap for DenseSolvableMap {
+impl SolvableStorage for DenseSolvableStorage {
     fn get(&self, id: SolvableId) -> Option<VariableId> {
         self.0.get(id.to_usize()).copied().flatten()
     }
@@ -57,9 +57,9 @@ impl SolvableMap for DenseSolvableMap {
 /// Best when the pool contains many solvables but only a small fraction are
 /// visited during solving.
 #[derive(Default)]
-pub struct SparseSolvableMap(HashMap<SolvableId, VariableId>);
+pub struct SparseSolvableStorage(HashMap<SolvableId, VariableId>);
 
-impl SolvableMap for SparseSolvableMap {
+impl SolvableStorage for SparseSolvableStorage {
     fn get(&self, id: SolvableId) -> Option<VariableId> {
         self.0.get(&id).copied()
     }
@@ -79,9 +79,9 @@ impl SolvableMap for SparseSolvableMap {
 ///
 /// The `VariableMap` is responsible for assigning unique identifiers to each
 /// variable represented by [`VariableId`].
-pub(crate) struct VariableMap<SM: SolvableMap> {
+pub(crate) struct VariableMap<SS: SolvableStorage> {
     /// A map from solvable id to variable id.
-    solvable_to_variable: SM,
+    solvable_to_variable: SS,
 
     /// Records the origin of each variable, indexed by its [`VariableId`].
     ///
@@ -107,17 +107,17 @@ pub(crate) enum VariableOrigin {
     AtLeastOne(NameId),
 }
 
-impl<SM: SolvableMap> Default for VariableMap<SM> {
+impl<SS: SolvableStorage> Default for VariableMap<SS> {
     fn default() -> Self {
         Self {
-            solvable_to_variable: SM::default(),
+            solvable_to_variable: SS::default(),
             // Index 0 is reserved for the root variable.
             origins: vec![VariableOrigin::Root],
         }
     }
 }
 
-impl<SM: SolvableMap> VariableMap<SM> {
+impl<SS: SolvableStorage> VariableMap<SS> {
     /// Allocate a new variable with the given origin and hand back its id.
     ///
     /// This is the single place that mutates `origins`, preserving the
@@ -179,27 +179,27 @@ impl<SM: SolvableMap> VariableMap<SM> {
 impl VariableId {
     /// Returns the solvable id associated with the variable if it represents a
     /// solvable.
-    pub(crate) fn as_solvable<SM: SolvableMap>(
+    pub(crate) fn as_solvable<SS: SolvableStorage>(
         self,
-        variable_map: &VariableMap<SM>,
+        variable_map: &VariableMap<SS>,
     ) -> Option<SolvableId> {
         variable_map.origin(self).as_solvable()
     }
 
     /// Returns the solvable-or-root id associated with the variable.
-    pub(crate) fn as_solvable_or_root<SM: SolvableMap>(
+    pub(crate) fn as_solvable_or_root<SS: SolvableStorage>(
         self,
-        variable_map: &VariableMap<SM>,
+        variable_map: &VariableMap<SS>,
     ) -> Option<SolvableOrRootId> {
         variable_map.origin(self).as_solvable_or_root()
     }
 
     /// Returns an object that can be used to format the variable.
-    pub(crate) fn display<'i, SM: SolvableMap, I: Interner>(
+    pub(crate) fn display<'i, SS: SolvableStorage, I: Interner>(
         self,
-        variable_map: &'i VariableMap<SM>,
+        variable_map: &'i VariableMap<SS>,
         interner: &'i I,
-    ) -> VariableDisplay<'i, SM, I> {
+    ) -> VariableDisplay<'i, SS, I> {
         VariableDisplay {
             variable: self,
             interner,
@@ -208,13 +208,13 @@ impl VariableId {
     }
 }
 
-pub(crate) struct VariableDisplay<'i, SM: SolvableMap, I: Interner> {
+pub(crate) struct VariableDisplay<'i, SS: SolvableStorage, I: Interner> {
     variable: VariableId,
     interner: &'i I,
-    variable_map: &'i VariableMap<SM>,
+    variable_map: &'i VariableMap<SS>,
 }
 
-impl<SM: SolvableMap, I: Interner> Display for VariableDisplay<'_, SM, I> {
+impl<SS: SolvableStorage, I: Interner> Display for VariableDisplay<'_, SS, I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.variable_map.origin(self.variable) {
             VariableOrigin::Root => write!(f, "root"),

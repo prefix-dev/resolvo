@@ -532,7 +532,7 @@ impl resolvo::Interner for &DependencyProvider {
 }
 
 impl resolvo::DependencyProvider for &DependencyProvider {
-    type SolvableMap = resolvo::SparseSolvableMap;
+    type SolvableStorage = resolvo::SparseSolvableStorage;
 
     async fn filter_candidates(
         &self,

@@ -19,7 +19,7 @@ use crate::{
         conditions::DisjunctionId,
         decision_map::DecisionMap,
         decision_tracker::DecisionTracker,
-        variable_map::{SolvableMap, VariableMap},
+        variable_map::{SolvableStorage, VariableMap},
     },
 };
 
@@ -357,11 +357,11 @@ impl Clause {
     }
 
     /// Construct a [`ClauseDisplay`] to display the clause.
-    pub fn display<'i, SM: SolvableMap, I: Interner>(
+    pub fn display<'i, SS: SolvableStorage, I: Interner>(
         &self,
-        variable_map: &'i VariableMap<SM>,
+        variable_map: &'i VariableMap<SS>,
         interner: &'i I,
-    ) -> ClauseDisplay<'i, SM, I> {
+    ) -> ClauseDisplay<'i, SS, I> {
         ClauseDisplay {
             kind: *self,
             variable_map,
@@ -613,13 +613,13 @@ impl VariableId {
 }
 
 /// A representation of a clause that implements [`Debug`]
-pub(crate) struct ClauseDisplay<'i, SM: SolvableMap, I: Interner> {
+pub(crate) struct ClauseDisplay<'i, SS: SolvableStorage, I: Interner> {
     kind: Clause,
     interner: &'i I,
-    variable_map: &'i VariableMap<SM>,
+    variable_map: &'i VariableMap<SS>,
 }
 
-impl<SM: SolvableMap, I: Interner> Display for ClauseDisplay<'_, SM, I> {
+impl<SS: SolvableStorage, I: Interner> Display for ClauseDisplay<'_, SS, I> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             Clause::InstallRoot => write!(f, "InstallRoot"),

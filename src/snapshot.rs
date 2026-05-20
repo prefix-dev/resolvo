@@ -16,7 +16,7 @@ use futures::FutureExt;
 
 use crate::{
     Candidates, Condition, Dependencies, DependencyProvider, HintDependenciesAvailable, Interner,
-    Mapping, NameId, Requirement, SolvableId, SolverCache, SparseSolvableMap, StringId,
+    Mapping, NameId, Requirement, SolvableId, SolverCache, SparseSolvableStorage, StringId,
     VersionSetId, VersionSetUnionId,
     internal::{arena::ArenaId, id::ConditionId},
 };
@@ -500,7 +500,7 @@ impl Interner for SnapshotProvider<'_> {
 }
 
 impl DependencyProvider for SnapshotProvider<'_> {
-    type SolvableMap = SparseSolvableMap;
+    type SolvableStorage = SparseSolvableStorage;
 
     async fn filter_candidates(
         &self,
