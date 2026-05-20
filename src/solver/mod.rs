@@ -1580,15 +1580,16 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         }
 
         // Add the clause
-        let learnt_id = self.state.learnt_clauses.alloc(learnt.clone());
+        let learnt_id = self.state.learnt_clauses.alloc(learnt);
         self.state.learnt_why.insert(learnt_id, learnt_why);
 
-        let (watched_literals, kind) = WatchedLiterals::learnt(learnt_id, &learnt);
+        let (watched_literals, kind) =
+            WatchedLiterals::learnt(learnt_id, &self.state.learnt_clauses[learnt_id]);
         let clause_id = self.state.add_clause(watched_literals, kind);
         self.state.learnt_clause_ids.push(clause_id);
 
         tracing::debug!("│├ Learnt disjunction:",);
-        for lit in learnt {
+        for lit in &self.state.learnt_clauses[learnt_id] {
             tracing::debug!(
                 "││ - {}{}",
                 if lit.negate() { "NOT " } else { "" },
