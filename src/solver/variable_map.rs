@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-#[cfg(not(feature = "dense-solvable-ids"))]
 use ahash::HashMap;
 
 use crate::{
@@ -11,22 +10,78 @@ use crate::{
     },
 };
 
+/// Trait abstracting over the solvable-to-variable mapping strategy.
+///
+/// Two implementations are provided:
+/// - [`DenseSolvableMap`]: `Vec`-based, O(1) lookup. Best when `SolvableId`s are
+///   allocated sequentially from 0 with no gaps.
+/// - [`SparseSolvableMap`]: `HashMap`-based. Only stores entries for solvables
+///   the solver has visited, efficient when the pool is large but few solvables
+///   are touched.
+pub trait SolvableMap: Default {
+    /// Look up the variable assigned to the given solvable, if any.
+    fn get(&self, id: SolvableId) -> Option<VariableId>;
+    /// Record the mapping from a solvable to its solver variable.
+    fn insert(&mut self, id: SolvableId, variable_id: VariableId);
+    /// Returns the approximate heap size in bytes.
+    fn size_in_bytes(&self) -> usize;
+}
+
+/// Vec-indexed solvable map. O(1) lookup without hashing.
+///
+/// Best when `SolvableId`s are dense and sequential (allocated from a single
+/// pool starting at 0).
+#[derive(Default)]
+pub struct DenseSolvableMap(Vec<Option<VariableId>>);
+
+impl SolvableMap for DenseSolvableMap {
+    fn get(&self, id: SolvableId) -> Option<VariableId> {
+        self.0.get(id.to_usize()).copied().flatten()
+    }
+
+    fn insert(&mut self, id: SolvableId, variable_id: VariableId) {
+        let idx = id.to_usize();
+        if idx >= self.0.len() {
+            self.0.resize(idx + 1, None);
+        }
+        self.0[idx] = Some(variable_id);
+    }
+
+    fn size_in_bytes(&self) -> usize {
+        self.0.capacity() * std::mem::size_of::<Option<VariableId>>()
+    }
+}
+
+/// HashMap-backed solvable map. Only stores entries for visited solvables.
+///
+/// Best when the pool contains many solvables but only a small fraction are
+/// visited during solving.
+#[derive(Default)]
+pub struct SparseSolvableMap(HashMap<SolvableId, VariableId>);
+
+impl SolvableMap for SparseSolvableMap {
+    fn get(&self, id: SolvableId) -> Option<VariableId> {
+        self.0.get(&id).copied()
+    }
+
+    fn insert(&mut self, id: SolvableId, variable_id: VariableId) {
+        self.0.insert(id, variable_id);
+    }
+
+    fn size_in_bytes(&self) -> usize {
+        self.0.capacity() * std::mem::size_of::<(SolvableId, VariableId)>()
+    }
+}
+
 /// All variables in the solver are stored in a `VariableMap`. This map is used
 /// to keep track of the semantics of a variable, e.g. what a specific variable
 /// represents.
 ///
 /// The `VariableMap` is responsible for assigning unique identifiers to each
 /// variable represented by [`VariableId`].
-pub struct VariableMap {
+pub(crate) struct VariableMap<SM: SolvableMap> {
     /// A map from solvable id to variable id.
-    ///
-    /// With the `dense-solvable-ids` feature, this is a `Vec` indexed by
-    /// `SolvableId` for O(1) lookup without hashing. Without it, this is a
-    /// `HashMap` that only stores entries for solvables the solver has visited.
-    #[cfg(feature = "dense-solvable-ids")]
-    solvable_to_variable: Vec<Option<VariableId>>,
-    #[cfg(not(feature = "dense-solvable-ids"))]
-    solvable_to_variable: HashMap<SolvableId, VariableId>,
+    solvable_to_variable: SM,
 
     /// Records the origin of each variable, indexed by its [`VariableId`].
     ///
@@ -37,7 +92,7 @@ pub struct VariableMap {
 
 /// Describes the origin of a variable.
 #[derive(Clone, Copy, Debug)]
-pub enum VariableOrigin {
+pub(crate) enum VariableOrigin {
     /// The variable is the root of the decision tree.
     Root,
 
@@ -52,20 +107,17 @@ pub enum VariableOrigin {
     AtLeastOne(NameId),
 }
 
-impl Default for VariableMap {
+impl<SM: SolvableMap> Default for VariableMap<SM> {
     fn default() -> Self {
         Self {
-            #[cfg(feature = "dense-solvable-ids")]
-            solvable_to_variable: Vec::new(),
-            #[cfg(not(feature = "dense-solvable-ids"))]
-            solvable_to_variable: HashMap::default(),
+            solvable_to_variable: SM::default(),
             // Index 0 is reserved for the root variable.
             origins: vec![VariableOrigin::Root],
         }
     }
 }
 
-impl VariableMap {
+impl<SM: SolvableMap> VariableMap<SM> {
     /// Allocate a new variable with the given origin and hand back its id.
     ///
     /// This is the single place that mutates `origins`, preserving the
@@ -78,24 +130,8 @@ impl VariableMap {
     }
 
     /// Allocate a variable for a new variable or reuse an existing one.
-    #[cfg(feature = "dense-solvable-ids")]
     pub fn intern_solvable(&mut self, solvable_id: SolvableId) -> VariableId {
-        let idx = solvable_id.to_usize();
-        if idx >= self.solvable_to_variable.len() {
-            self.solvable_to_variable.resize(idx + 1, None);
-        }
-        if let Some(variable_id) = self.solvable_to_variable[idx] {
-            return variable_id;
-        }
-        let variable_id = self.alloc(VariableOrigin::Solvable(solvable_id));
-        self.solvable_to_variable[idx] = Some(variable_id);
-        variable_id
-    }
-
-    /// Allocate a variable for a new variable or reuse an existing one.
-    #[cfg(not(feature = "dense-solvable-ids"))]
-    pub fn intern_solvable(&mut self, solvable_id: SolvableId) -> VariableId {
-        if let Some(&variable_id) = self.solvable_to_variable.get(&solvable_id) {
+        if let Some(variable_id) = self.solvable_to_variable.get(solvable_id) {
             return variable_id;
         }
         let variable_id = self.alloc(VariableOrigin::Solvable(solvable_id));
@@ -108,16 +144,10 @@ impl VariableMap {
         self.origins.len()
     }
 
-    #[cfg(all(feature = "diagnostics", feature = "dense-solvable-ids"))]
+    #[cfg(feature = "diagnostics")]
     pub fn size_in_bytes(&self) -> usize {
         self.origins.capacity() * std::mem::size_of::<VariableOrigin>()
-            + self.solvable_to_variable.capacity() * std::mem::size_of::<Option<VariableId>>()
-    }
-
-    #[cfg(all(feature = "diagnostics", not(feature = "dense-solvable-ids")))]
-    pub fn size_in_bytes(&self) -> usize {
-        self.origins.capacity() * std::mem::size_of::<VariableOrigin>()
-            + self.solvable_to_variable.capacity() * std::mem::size_of::<(SolvableId, VariableId)>()
+            + self.solvable_to_variable.size_in_bytes()
     }
 
     /// Allocate a variable for a solvable or the root.
@@ -149,20 +179,27 @@ impl VariableMap {
 impl VariableId {
     /// Returns the solvable id associated with the variable if it represents a
     /// solvable.
-    pub fn as_solvable(self, variable_map: &VariableMap) -> Option<SolvableId> {
+    pub(crate) fn as_solvable<SM: SolvableMap>(
+        self,
+        variable_map: &VariableMap<SM>,
+    ) -> Option<SolvableId> {
         variable_map.origin(self).as_solvable()
     }
 
-    pub fn as_solvable_or_root(self, variable_map: &VariableMap) -> Option<SolvableOrRootId> {
+    /// Returns the solvable-or-root id associated with the variable.
+    pub(crate) fn as_solvable_or_root<SM: SolvableMap>(
+        self,
+        variable_map: &VariableMap<SM>,
+    ) -> Option<SolvableOrRootId> {
         variable_map.origin(self).as_solvable_or_root()
     }
 
     /// Returns an object that can be used to format the variable.
-    pub fn display<'i, I: Interner>(
+    pub(crate) fn display<'i, SM: SolvableMap, I: Interner>(
         self,
-        variable_map: &'i VariableMap,
+        variable_map: &'i VariableMap<SM>,
         interner: &'i I,
-    ) -> VariableDisplay<'i, I> {
+    ) -> VariableDisplay<'i, SM, I> {
         VariableDisplay {
             variable: self,
             interner,
@@ -171,13 +208,13 @@ impl VariableId {
     }
 }
 
-pub struct VariableDisplay<'i, I: Interner> {
+pub(crate) struct VariableDisplay<'i, SM: SolvableMap, I: Interner> {
     variable: VariableId,
     interner: &'i I,
-    variable_map: &'i VariableMap,
+    variable_map: &'i VariableMap<SM>,
 }
 
-impl<I: Interner> Display for VariableDisplay<'_, I> {
+impl<SM: SolvableMap, I: Interner> Display for VariableDisplay<'_, SM, I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.variable_map.origin(self.variable) {
             VariableOrigin::Root => write!(f, "root"),
@@ -195,14 +232,14 @@ impl<I: Interner> Display for VariableDisplay<'_, I> {
 }
 
 impl VariableOrigin {
-    pub fn as_solvable(&self) -> Option<SolvableId> {
+    pub(crate) fn as_solvable(&self) -> Option<SolvableId> {
         match self {
             VariableOrigin::Solvable(solvable_id) => Some(*solvable_id),
             _ => None,
         }
     }
 
-    pub fn as_solvable_or_root(&self) -> Option<SolvableOrRootId> {
+    pub(crate) fn as_solvable_or_root(&self) -> Option<SolvableOrRootId> {
         match self {
             VariableOrigin::Solvable(solvable_id) => Some((*solvable_id).into()),
             VariableOrigin::Root => Some(SolvableOrRootId::root()),

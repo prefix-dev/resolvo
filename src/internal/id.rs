@@ -198,10 +198,12 @@ impl ArenaId for DependenciesId {
 pub struct VariableId(u32);
 
 impl VariableId {
+    /// Returns the variable id representing the root of the decision tree.
     pub fn root() -> Self {
         Self(0)
     }
 
+    /// Returns `true` if this variable represents the root.
     pub fn is_root(self) -> bool {
         self.0 == 0
     }

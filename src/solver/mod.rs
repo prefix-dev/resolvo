@@ -10,7 +10,7 @@ use elsa::FrozenMap;
 use encoding::Encoder;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use variable_map::VariableMap;
+use variable_map::{SolvableMap, VariableMap};
 use watch_map::WatchMap;
 
 use crate::{
@@ -150,7 +150,7 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
     pub(crate) cache: SolverCache<D>,
 
     /// Holds the current state of the solver.
-    pub(crate) state: SolverState,
+    pub(crate) state: SolverState<D::SolvableMap>,
 
     /// The activity add factor. This is a value that is added to the activity
     /// score of each package that is part of a conflict.
@@ -165,7 +165,7 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
 type RequiresClause = (Requirement, Option<DisjunctionId>, ClauseId);
 
 #[derive(Default)]
-pub(crate) struct SolverState {
+pub(crate) struct SolverState<SM: SolvableMap> {
     pub(crate) clauses: Clauses,
     requires_clauses: IndexMap<VariableId, Vec<RequiresClause>, ahash::RandomState>,
     watches: WatchMap,
@@ -175,7 +175,7 @@ pub(crate) struct SolverState {
     requirement_to_sorted_candidates:
         FrozenMap<Requirement, RequirementCandidateVariables, ahash::RandomState>,
 
-    pub(crate) variable_map: VariableMap,
+    pub(crate) variable_map: VariableMap<SM>,
 
     negative_assertions: Vec<(VariableId, ClauseId)>,
 
@@ -1618,7 +1618,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     }
 }
 
-impl SolverState {
+impl<SM: SolvableMap> SolverState<SM> {
     /// Allocate a clause and, if it has watched literals, register them in
     /// the [`WatchMap`].
     pub(crate) fn add_clause(

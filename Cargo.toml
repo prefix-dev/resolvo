@@ -34,7 +34,6 @@ rust-version.workspace = true
 
 [features]
 diagnostics = ["tabwriter", "human_bytes"]
-dense-solvable-ids = []
 
 [dependencies]
 ahash = "0.8.12"

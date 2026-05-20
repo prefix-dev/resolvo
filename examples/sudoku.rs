@@ -223,6 +223,8 @@ impl SudokuProvider {
 }
 
 impl DependencyProvider for SudokuProvider {
+    type SolvableMap = resolvo::SparseSolvableMap;
+
     async fn filter_candidates(
         &self,
         candidates: &[SolvableId],

@@ -15,8 +15,11 @@ use crate::{
         id::{ClauseId, LearntClauseId, StringId, VersionSetId},
     },
     solver::{
-        VariableId, conditions::DisjunctionId, decision_map::DecisionMap,
-        decision_tracker::DecisionTracker, variable_map::VariableMap,
+        VariableId,
+        conditions::DisjunctionId,
+        decision_map::DecisionMap,
+        decision_tracker::DecisionTracker,
+        variable_map::{SolvableMap, VariableMap},
     },
 };
 
@@ -354,11 +357,11 @@ impl Clause {
     }
 
     /// Construct a [`ClauseDisplay`] to display the clause.
-    pub fn display<'i, I: Interner>(
+    pub fn display<'i, SM: SolvableMap, I: Interner>(
         &self,
-        variable_map: &'i VariableMap,
+        variable_map: &'i VariableMap<SM>,
         interner: &'i I,
-    ) -> ClauseDisplay<'i, I> {
+    ) -> ClauseDisplay<'i, SM, I> {
         ClauseDisplay {
             kind: *self,
             variable_map,
@@ -598,25 +601,25 @@ impl Literal {
 impl VariableId {
     /// Constructs a [`Literal`] that indicates this solvable should be assigned
     /// a positive value.
-    pub fn positive(self) -> Literal {
+    pub(crate) fn positive(self) -> Literal {
         Literal::new(self, false)
     }
 
     /// Constructs a [`Literal`] that indicates this solvable should be assigned
     /// a negative value.
-    pub fn negative(self) -> Literal {
+    pub(crate) fn negative(self) -> Literal {
         Literal::new(self, true)
     }
 }
 
 /// A representation of a clause that implements [`Debug`]
-pub(crate) struct ClauseDisplay<'i, I: Interner> {
+pub(crate) struct ClauseDisplay<'i, SM: SolvableMap, I: Interner> {
     kind: Clause,
     interner: &'i I,
-    variable_map: &'i VariableMap,
+    variable_map: &'i VariableMap<SM>,
 }
 
-impl<I: Interner> Display for ClauseDisplay<'_, I> {
+impl<SM: SolvableMap, I: Interner> Display for ClauseDisplay<'_, SM, I> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             Clause::InstallRoot => write!(f, "InstallRoot"),

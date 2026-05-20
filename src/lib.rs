@@ -28,11 +28,15 @@ use std::{
 pub use conditional_requirement::{Condition, ConditionalRequirement, LogicalOperator};
 pub use internal::arena::ArenaId;
 pub use internal::id::{
-    ConditionId, NameId, SolvableId, SolvableOrRootId, StringId, VersionSetId, VersionSetUnionId,
+    ConditionId, NameId, SolvableId, SolvableOrRootId, StringId, VariableId, VersionSetId,
+    VersionSetUnionId,
 };
 use itertools::Itertools;
 pub use requirement::Requirement;
-pub use solver::{Problem, Solver, SolverCache, UnsolvableOrCancelled};
+pub use solver::{
+    Problem, Solver, SolverCache, UnsolvableOrCancelled,
+    variable_map::{DenseSolvableMap, SolvableMap, SparseSolvableMap},
+};
 pub use utils::{Mapping, MappingIter};
 
 /// An object that is used by the solver to query certain properties of
@@ -116,6 +120,16 @@ pub trait Interner {
 /// solver to access the packages that are available in the system.
 #[allow(async_fn_in_trait)]
 pub trait DependencyProvider: Sized + Interner {
+    /// Controls the data structure used to map `SolvableId`s to solver
+    /// variables. Use [`DenseSolvableMap`] when IDs are sequential from 0 (the
+    /// common case with a single pool), or [`SparseSolvableMap`] when the pool
+    /// is large but only a fraction of solvables are visited during solving.
+    // NOTE: once `generic_const_exprs` stabilizes, this could become
+    // `const DENSE_SOLVABLE_IDS: bool = false;` — providers would just set a
+    // bool instead of importing a type, and the solver would use
+    // `SolverState<{ D::DENSE_SOLVABLE_IDS }>` internally.
+    type SolvableMap: SolvableMap;
+
     /// Given a set of solvables, return the candidates that match the given
     /// version set or if `inverse` is true, the candidates that do *not* match
     /// the version set.

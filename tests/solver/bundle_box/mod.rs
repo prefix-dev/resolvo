@@ -297,6 +297,8 @@ impl Interner for BundleBoxProvider {
 }
 
 impl DependencyProvider for BundleBoxProvider {
+    type SolvableMap = resolvo::SparseSolvableMap;
+
     async fn filter_candidates(
         &self,
         candidates: &[SolvableId],
