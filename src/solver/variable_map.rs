@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+#[cfg(not(feature = "dense-solvable-ids"))]
 use ahash::HashMap;
 
 use crate::{
@@ -17,17 +18,20 @@ use crate::{
 /// The `VariableMap` is responsible for assigning unique identifiers to each
 /// variable represented by [`VariableId`].
 pub struct VariableMap {
-    /// The id of the next variable to be allocated.
-    next_id: usize,
-
     /// A map from solvable id to variable id.
+    ///
+    /// With the `dense-solvable-ids` feature, this is a `Vec` indexed by
+    /// `SolvableId` for O(1) lookup without hashing. Without it, this is a
+    /// `HashMap` that only stores entries for solvables the solver has visited.
+    #[cfg(feature = "dense-solvable-ids")]
+    solvable_to_variable: Vec<Option<VariableId>>,
+    #[cfg(not(feature = "dense-solvable-ids"))]
     solvable_to_variable: HashMap<SolvableId, VariableId>,
 
     /// Records the origin of each variable, indexed by its [`VariableId`].
     ///
-    /// Invariant: `origins.len() == next_id`, i.e. every allocated variable
-    /// has its slot pushed in the same step it is handed out. Do not insert
-    /// gaps; [`Self::origin`] indexes directly.
+    /// Invariant: every allocated variable has its slot pushed in the same step
+    /// it is handed out. Do not insert gaps; [`Self::origin`] indexes directly.
     origins: Vec<VariableOrigin>,
 }
 
@@ -51,9 +55,11 @@ pub enum VariableOrigin {
 impl Default for VariableMap {
     fn default() -> Self {
         Self {
-            // The first variable id is 1 because 0 is reserved for the root.
-            next_id: 1,
+            #[cfg(feature = "dense-solvable-ids")]
+            solvable_to_variable: Vec::new(),
+            #[cfg(not(feature = "dense-solvable-ids"))]
             solvable_to_variable: HashMap::default(),
+            // Index 0 is reserved for the root variable.
             origins: vec![VariableOrigin::Root],
         }
     }
@@ -62,18 +68,32 @@ impl Default for VariableMap {
 impl VariableMap {
     /// Allocate a new variable with the given origin and hand back its id.
     ///
-    /// This is the single place that mutates `next_id`/`origins` together,
-    /// preserving the `origins.len() == next_id` invariant. Always extends
-    /// `origins` by exactly one slot.
+    /// This is the single place that mutates `origins`, preserving the
+    /// invariant that every variable has exactly one origin slot. Always
+    /// extends `origins` by exactly one slot.
     fn alloc(&mut self, origin: VariableOrigin) -> VariableId {
-        let id = self.next_id;
-        self.next_id += 1;
-        debug_assert_eq!(id, self.origins.len());
+        let id = self.origins.len();
         self.origins.push(origin);
         VariableId::from_usize(id)
     }
 
     /// Allocate a variable for a new variable or reuse an existing one.
+    #[cfg(feature = "dense-solvable-ids")]
+    pub fn intern_solvable(&mut self, solvable_id: SolvableId) -> VariableId {
+        let idx = solvable_id.to_usize();
+        if idx >= self.solvable_to_variable.len() {
+            self.solvable_to_variable.resize(idx + 1, None);
+        }
+        if let Some(variable_id) = self.solvable_to_variable[idx] {
+            return variable_id;
+        }
+        let variable_id = self.alloc(VariableOrigin::Solvable(solvable_id));
+        self.solvable_to_variable[idx] = Some(variable_id);
+        variable_id
+    }
+
+    /// Allocate a variable for a new variable or reuse an existing one.
+    #[cfg(not(feature = "dense-solvable-ids"))]
     pub fn intern_solvable(&mut self, solvable_id: SolvableId) -> VariableId {
         if let Some(&variable_id) = self.solvable_to_variable.get(&solvable_id) {
             return variable_id;
@@ -85,10 +105,16 @@ impl VariableMap {
 
     #[cfg(feature = "diagnostics")]
     pub fn count(&self) -> usize {
-        self.next_id
+        self.origins.len()
     }
 
-    #[cfg(feature = "diagnostics")]
+    #[cfg(all(feature = "diagnostics", feature = "dense-solvable-ids"))]
+    pub fn size_in_bytes(&self) -> usize {
+        self.origins.capacity() * std::mem::size_of::<VariableOrigin>()
+            + self.solvable_to_variable.capacity() * std::mem::size_of::<Option<VariableId>>()
+    }
+
+    #[cfg(all(feature = "diagnostics", not(feature = "dense-solvable-ids")))]
     pub fn size_in_bytes(&self) -> usize {
         self.origins.capacity() * std::mem::size_of::<VariableOrigin>()
             + self.solvable_to_variable.capacity() * std::mem::size_of::<(SolvableId, VariableId)>()
