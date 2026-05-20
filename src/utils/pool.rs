@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     fmt::{Display, Formatter},
     hash::Hash,
 };
@@ -117,14 +118,14 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
     /// [`Self::resolve_package_name`] function.
     pub fn intern_package_name<NValue>(&self, name: NValue) -> NameId
     where
-        NValue: Into<N>,
-        N: Clone,
+        NValue: Into<N> + AsRef<str>,
+        N: Clone + Borrow<str>,
     {
-        let name = name.into();
-        if let Some(id) = self.names_to_ids.get_copy(&name) {
+        if let Some(id) = self.names_to_ids.get_copy(name.as_ref()) {
             return id;
         }
 
+        let name = name.into();
         let next_id = self.package_names.alloc(name.clone());
         self.names_to_ids.insert_copy(name, next_id);
         next_id
