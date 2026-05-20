@@ -32,7 +32,7 @@ pub struct VariableMap {
 }
 
 /// Describes the origin of a variable.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum VariableOrigin {
     /// The variable is the root of the decision tree.
     Root,
@@ -116,7 +116,7 @@ impl VariableMap {
     /// Returns the origin of a variable. The origin describes the semantics of
     /// a variable.
     pub fn origin(&self, variable_id: VariableId) -> VariableOrigin {
-        self.origins[variable_id.to_usize()].clone()
+        self.origins[variable_id.to_usize()]
     }
 }
 

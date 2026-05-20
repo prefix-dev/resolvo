@@ -2,7 +2,7 @@ use crate::{Requirement, VersionSetId, VersionSetUnionId, internal::id::Conditio
 
 /// A [`ConditionalRequirement`] is a requirement that is only enforced when a
 /// certain condition holds.
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConditionalRequirement {
     /// The requirement is enforced only when the condition evaluates to true.
