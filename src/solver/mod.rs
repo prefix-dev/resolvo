@@ -469,6 +469,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             .unwrap_or(0);
 
         let mut level = starting_level;
+        let mut new_solvables: Vec<(VariableId, ClauseId)> = Vec::new();
+        let mut solvable_ids: Vec<SolvableOrRootId> = Vec::new();
 
         loop {
             if level == starting_level {
@@ -575,26 +577,27 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             // Determine which solvables are part of the solution for which we did not yet
             // get any dependencies. If we find any such solvable it means we
             // did not arrive at the full solution yet.
-            let new_solvables: Vec<_> = self
-                .state
-                .decision_tracker
-                .stack()
-                // Filter only decisions that led to a positive assignment
-                .filter(|d| d.value)
-                // Select solvables for which we do not yet have dependencies
-                .filter(|d| {
-                    let Some(solvable_or_root) =
-                        d.variable.as_solvable_or_root(&self.state.variable_map)
-                    else {
-                        return false;
-                    };
-                    !self
-                        .state
-                        .clauses_added_for_solvable
-                        .contains(solvable_or_root)
-                })
-                .map(|d| (d.variable, d.derived_from))
-                .collect();
+            new_solvables.clear();
+            new_solvables.extend(
+                self.state
+                    .decision_tracker
+                    .stack()
+                    // Filter only decisions that led to a positive assignment
+                    .filter(|d| d.value)
+                    // Select solvables for which we do not yet have dependencies
+                    .filter(|d| {
+                        let Some(solvable_or_root) =
+                            d.variable.as_solvable_or_root(&self.state.variable_map)
+                        else {
+                            return false;
+                        };
+                        !self
+                            .state
+                            .clauses_added_for_solvable
+                            .contains(solvable_or_root)
+                    })
+                    .map(|d| (d.variable, d.derived_from)),
+            );
 
             if new_solvables.is_empty() {
                 // If no new literals were selected this solution is complete and we can return.
@@ -621,21 +624,20 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             );
             tracing::debug!("====");
 
-            let new_solvables: Vec<SolvableOrRootId> = new_solvables
-                .iter()
-                .filter_map(|(variable, _)| {
-                    self.state
-                        .variable_map
-                        .origin(*variable)
-                        .as_solvable()
-                        .map(Into::into)
-                })
-                .collect::<Vec<_>>();
+            solvable_ids.clear();
+            solvable_ids.extend(new_solvables.iter().filter_map(|(variable, _)| {
+                self.state
+                    .variable_map
+                    .origin(*variable)
+                    .as_solvable()
+                    .map(SolvableOrRootId::from)
+            }));
 
             #[cfg(feature = "diagnostics")]
             let encoding_start = std::time::Instant::now();
             let conflicting_clauses = self.async_runtime.block_on(
-                Encoder::new(&mut self.state, &self.cache, root_deps, level).encode(new_solvables),
+                Encoder::new(&mut self.state, &self.cache, root_deps, level)
+                    .encode(solvable_ids.iter().copied()),
             )?;
             #[cfg(feature = "diagnostics")]
             {
