@@ -1049,8 +1049,8 @@ fn solve_for_snapshot<D: DependencyProvider>(
 ) -> String {
     let mut solver = Solver::new(provider);
     let problem = Problem::new()
-        .requirements(root_reqs.iter().cloned().collect())
-        .constraints(root_constraints.iter().copied().map(Into::into).collect());
+        .requirements(root_reqs.to_vec())
+        .constraints(root_constraints.to_vec());
     match solver.solve(problem) {
         Ok(solvables) => transaction_to_string(solver.provider(), &solvables),
         Err(UnsolvableOrCancelled::Unsolvable(conflict)) => {

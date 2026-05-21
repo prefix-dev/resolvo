@@ -87,7 +87,7 @@ impl BundleBoxProvider {
     }
 
     pub fn intern_condition(&mut self, condition: &SpecCondition) -> ConditionId {
-        if let Some(id) = self.conditions.get(&condition) {
+        if let Some(id) = self.conditions.get(condition) {
             return *id;
         }
 
@@ -105,7 +105,7 @@ impl BundleBoxProvider {
     pub fn requirements(&mut self, requirements: &[&str]) -> Vec<ConditionalRequirement> {
         requirements
             .iter()
-            .map(|dep| ConditionalSpec::from_str(*dep).unwrap())
+            .map(|dep| ConditionalSpec::from_str(dep).unwrap())
             .map(|spec| {
                 let mut iter = spec
                     .specs
@@ -132,7 +132,7 @@ impl BundleBoxProvider {
     pub fn version_sets(&mut self, requirements: &[&str]) -> Vec<VersionSetId> {
         requirements
             .iter()
-            .map(|dep| Spec::from_str(*dep).unwrap())
+            .map(|dep| Spec::from_str(dep).unwrap())
             .map(|spec| {
                 let name = self.pool.intern_package_name(&spec.name);
                 self.pool.intern_version_set(name, spec.versions)
@@ -307,7 +307,7 @@ impl DependencyProvider for BundleBoxProvider {
         candidates
             .iter()
             .copied()
-            .filter(|s| range.contains(&self.pool.resolve_solvable(*s).record) == !inverse)
+            .filter(|s| range.contains(&self.pool.resolve_solvable(*s).record) != inverse)
             .collect()
     }
 

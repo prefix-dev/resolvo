@@ -743,17 +743,11 @@ mod test {
             clause.as_ref().unwrap().watched_literals[0].variable(),
             parent
         );
-        assert_eq!(
-            clause.unwrap().watched_literals[1].variable(),
-            candidate1.into()
-        );
+        assert_eq!(clause.unwrap().watched_literals[1].variable(), candidate1);
 
         // No conflict, still one candidate available
         decisions
-            .try_add_decision(
-                Decision::new(candidate1.into(), false, ClauseId::from_usize(0)),
-                1,
-            )
+            .try_add_decision(Decision::new(candidate1, false, ClauseId::from_usize(0)), 1)
             .unwrap();
         let (clause, conflict, _kind) = WatchedLiterals::requires(
             parent,
@@ -769,13 +763,13 @@ mod test {
         );
         assert_eq!(
             clause.as_ref().unwrap().watched_literals[1].variable(),
-            candidate2.into()
+            candidate2
         );
 
         // Conflict, no candidates available
         decisions
             .try_add_decision(
-                Decision::new(candidate2.into(), false, ClauseId::install_root()),
+                Decision::new(candidate2, false, ClauseId::install_root()),
                 1,
             )
             .unwrap();
@@ -793,7 +787,7 @@ mod test {
         );
         assert_eq!(
             clause.as_ref().unwrap().watched_literals[1].variable(),
-            candidate1.into()
+            candidate1
         );
 
         // Panic

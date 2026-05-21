@@ -40,9 +40,9 @@ where
         .then(
             any()
                 .try_map(|c: I::Token, span| {
-                    if c.to_ascii().map_or(false, |i| {
-                        i.is_ascii_alphanumeric() || i == b'_' || i == b'-'
-                    }) {
+                    if c.to_ascii()
+                        .is_some_and(|i| i.is_ascii_alphanumeric() || i == b'_' || i == b'-')
+                    {
                         Ok(())
                     } else {
                         Err(LabelError::expected_found(

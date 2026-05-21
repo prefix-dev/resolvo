@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     fmt::{Display, Formatter},
     hash::Hash,
 };
@@ -113,18 +114,23 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
     /// are deduplicated. If the same name is inserted twice the same
     /// `NameId` will be returned.
     ///
+    /// Accepts either an owned `N` or a borrowed form of it (e.g. `&str`,
+    /// `&String`, or `String` when `N = String`). On a cache hit the input is
+    /// looked up via its borrowed form, avoiding allocation; only on a cache
+    /// miss is it converted into an owned `N`.
+    ///
     /// The original name can be resolved using the
     /// [`Self::resolve_package_name`] function.
     pub fn intern_package_name<NValue>(&self, name: NValue) -> NameId
     where
-        NValue: Into<N>,
-        N: Clone,
+        NValue: IntoPackageName<N>,
+        N: Borrow<NValue::Borrowed> + Clone,
     {
-        let name = name.into();
-        if let Some(id) = self.names_to_ids.get_copy(&name) {
+        if let Some(id) = self.names_to_ids.get_copy(name.as_borrowed()) {
             return id;
         }
 
+        let name = name.into_owned();
         let next_id = self.package_names.alloc(name.clone());
         self.names_to_ids.insert_copy(name, next_id);
         next_id
@@ -174,15 +180,12 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
     /// Version sets are deduplicated. This means that if the same version set
     /// is inserted twice they will share the same [`VersionSetId`].
     pub fn intern_version_set(&self, package_name: NameId, version_set: VS) -> VersionSetId {
-        if let Some(entry) = self
-            .version_set_to_id
-            .get_copy(&(package_name, version_set.clone()))
-        {
+        let key = (package_name, version_set);
+        if let Some(entry) = self.version_set_to_id.get_copy(&key) {
             entry
         } else {
-            let id = self.version_sets.alloc((package_name, version_set.clone()));
-            self.version_set_to_id
-                .insert_copy((package_name, version_set), id);
+            let id = self.version_sets.alloc(key.clone());
+            self.version_set_to_id.insert_copy(key, id);
             id
         }
     }
@@ -283,6 +286,59 @@ impl NameId {
 pub trait PackageName: Eq + Hash {}
 
 impl<N: Eq + Hash> PackageName for N {}
+
+/// A value that can be used to look up or insert a package name in a [`Pool`].
+///
+/// Implemented for owned package names, references to package names, and
+/// (when `N = String`) for `&str`. The associated [`Borrowed`] type is the
+/// borrowed key used for the cache lookup, so a cache hit never has to
+/// allocate; only on a cache miss is [`into_owned`] called to produce the
+/// owned value that gets stored.
+///
+/// [`Borrowed`]: IntoPackageName::Borrowed
+/// [`into_owned`]: IntoPackageName::into_owned
+pub trait IntoPackageName<N: PackageName> {
+    /// The borrowed form used for cache lookups. `N` must implement
+    /// [`Borrow<Self::Borrowed>`] so the map key (`N`) and the lookup key
+    /// (`Self::Borrowed`) hash consistently.
+    type Borrowed: ?Sized + Hash + Eq;
+
+    /// Borrow `self` as the lookup key.
+    fn as_borrowed(&self) -> &Self::Borrowed;
+
+    /// Convert `self` into an owned `N` (only called on cache miss).
+    fn into_owned(self) -> N;
+}
+
+impl<N: PackageName> IntoPackageName<N> for N {
+    type Borrowed = N;
+    fn as_borrowed(&self) -> &N {
+        self
+    }
+    fn into_owned(self) -> N {
+        self
+    }
+}
+
+impl<N: PackageName + Clone> IntoPackageName<N> for &N {
+    type Borrowed = N;
+    fn as_borrowed(&self) -> &N {
+        self
+    }
+    fn into_owned(self) -> N {
+        self.clone()
+    }
+}
+
+impl IntoPackageName<String> for &str {
+    type Borrowed = str;
+    fn as_borrowed(&self) -> &str {
+        self
+    }
+    fn into_owned(self) -> String {
+        self.to_string()
+    }
+}
 
 /// A [`VersionSet`] describes a set of "versions". The trait defines whether a
 /// given version is part of the set or not.

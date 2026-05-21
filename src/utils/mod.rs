@@ -5,4 +5,4 @@ mod mapping;
 mod pool;
 
 pub use mapping::{Mapping, MappingIter};
-pub use pool::{PackageName, Pool, Solvable, VersionSet};
+pub use pool::{IntoPackageName, PackageName, Pool, Solvable, VersionSet};

@@ -235,7 +235,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
         // For each requirement request the matching candidates.
         for requirement in requirements {
-            self.queue_conditional_requirement(solvable_id, requirement.clone());
+            self.queue_conditional_requirement(solvable_id, *requirement);
         }
 
         // For each constraint, request the candidates that are non-matching
