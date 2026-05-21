@@ -175,15 +175,12 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
     /// Version sets are deduplicated. This means that if the same version set
     /// is inserted twice they will share the same [`VersionSetId`].
     pub fn intern_version_set(&self, package_name: NameId, version_set: VS) -> VersionSetId {
-        if let Some(entry) = self
-            .version_set_to_id
-            .get_copy(&(package_name, version_set.clone()))
-        {
+        let key = (package_name, version_set);
+        if let Some(entry) = self.version_set_to_id.get_copy(&key) {
             entry
         } else {
-            let id = self.version_sets.alloc((package_name, version_set.clone()));
-            self.version_set_to_id
-                .insert_copy((package_name, version_set), id);
+            let id = self.version_sets.alloc(key.clone());
+            self.version_set_to_id.insert_copy(key, id);
             id
         }
     }
