@@ -180,44 +180,52 @@ impl ArenaId for CandidatesId {
 /// The id associated to an arena of PackageRequirements
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct DependenciesId(u32);
+pub(crate) struct DependenciesId(NonZeroU32);
 
 impl ArenaId for DependenciesId {
     fn from_usize(x: usize) -> Self {
-        Self(x as u32)
+        let raw: u32 = (x + 1).try_into().expect("dependencies id too big");
+        // SAFETY: `raw` is `x + 1`, hence at least 1, hence non-zero.
+        Self(unsafe { NonZeroU32::new_unchecked(raw) })
     }
 
     fn to_usize(self) -> usize {
-        self.0 as usize
+        (self.0.get() - 1) as usize
     }
 }
 
 /// A unique identifier for a variable in the solver.
+///
+/// Uses a non-zero representation so that `Option<VariableId>` is the same
+/// size as `VariableId`.
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct VariableId(u32);
+pub struct VariableId(NonZeroU32);
 
 impl VariableId {
     /// Returns the variable id representing the root of the decision tree.
     pub fn root() -> Self {
-        Self(0)
+        // SAFETY: 1 is non-zero.
+        Self(unsafe { NonZeroU32::new_unchecked(1) })
     }
 
     /// Returns `true` if this variable represents the root.
     pub fn is_root(self) -> bool {
-        self.0 == 0
+        self.0.get() == 1
     }
 }
 
 impl ArenaId for VariableId {
     #[inline]
     fn from_usize(x: usize) -> Self {
-        Self(x.try_into().expect("variable id too big"))
+        let raw: u32 = (x + 1).try_into().expect("variable id too big");
+        // SAFETY: `raw` is `x + 1`, hence at least 1, hence non-zero.
+        Self(unsafe { NonZeroU32::new_unchecked(raw) })
     }
 
     #[inline]
     fn to_usize(self) -> usize {
-        self.0 as usize
+        (self.0.get() - 1) as usize
     }
 }
 
@@ -320,5 +328,32 @@ mod tests {
             std::mem::size_of::<ClauseId>(),
             std::mem::size_of::<Option<ClauseId>>()
         );
+    }
+
+    #[test]
+    fn test_variable_id_niche() {
+        assert_eq!(std::mem::size_of::<VariableId>(), 4);
+        assert_eq!(
+            std::mem::size_of::<VariableId>(),
+            std::mem::size_of::<Option<VariableId>>()
+        );
+    }
+
+    #[test]
+    fn test_dependencies_id_niche() {
+        assert_eq!(std::mem::size_of::<DependenciesId>(), 4);
+        assert_eq!(
+            std::mem::size_of::<DependenciesId>(),
+            std::mem::size_of::<Option<DependenciesId>>()
+        );
+    }
+
+    #[test]
+    fn test_variable_id_root_roundtrip() {
+        assert!(VariableId::root().is_root());
+        assert_eq!(VariableId::root().to_usize(), 0);
+        assert_eq!(VariableId::from_usize(0), VariableId::root());
+        assert!(!VariableId::from_usize(1).is_root());
+        assert_eq!(VariableId::from_usize(7).to_usize(), 7);
     }
 }

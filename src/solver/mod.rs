@@ -10,7 +10,9 @@ use elsa::FrozenMap;
 use encoding::Encoder;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use variable_map::{SolvableStorage, VariableMap};
+use variable_map::VariableMap;
+
+use crate::solvable_id::{self, SolvableSet};
 use watch_map::WatchMap;
 
 use crate::{
@@ -150,7 +152,7 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
     pub(crate) cache: SolverCache<D>,
 
     /// Holds the current state of the solver.
-    pub(crate) state: SolverState<D::SolvableStorage>,
+    pub(crate) state: SolverState<D::SolvableIdLayout>,
 
     /// The activity add factor. This is a value that is added to the activity
     /// score of each package that is part of a conflict.
@@ -165,7 +167,7 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
 type RequiresClause = (Requirement, Option<DisjunctionId>, ClauseId);
 
 #[derive(Default)]
-pub(crate) struct SolverState<SS: SolvableStorage> {
+pub(crate) struct SolverState<L: solvable_id::Layout> {
     pub(crate) clauses: Clauses,
     requires_clauses: IndexMap<VariableId, Vec<RequiresClause>, ahash::RandomState>,
     watches: WatchMap,
@@ -175,7 +177,7 @@ pub(crate) struct SolverState<SS: SolvableStorage> {
     requirement_to_sorted_candidates:
         FrozenMap<Requirement, RequirementCandidateVariables, ahash::RandomState>,
 
-    pub(crate) variable_map: VariableMap<SS>,
+    pub(crate) variable_map: VariableMap<L>,
 
     negative_assertions: Vec<(VariableId, ClauseId)>,
 
@@ -186,7 +188,7 @@ pub(crate) struct SolverState<SS: SolvableStorage> {
     disjunctions: Arena<DisjunctionId, Disjunction>,
 
     clauses_added_for_package: IndexedSet<NameId>,
-    clauses_added_for_solvable: IndexedSet<SolvableOrRootId>,
+    clauses_added_for_solvable: <L as solvable_id::Sealed>::Set<SolvableOrRootId>,
     at_most_one_trackers: HashMap<NameId, AtMostOnceTracker<VariableId>>,
 
     /// Keeps track of auxiliary variables that are used to encode at-least-one
@@ -1618,7 +1620,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     }
 }
 
-impl<SS: SolvableStorage> SolverState<SS> {
+impl<L: solvable_id::Layout> SolverState<L> {
     /// Allocate a clause and, if it has watched literals, register them in
     /// the [`WatchMap`].
     pub(crate) fn add_clause(

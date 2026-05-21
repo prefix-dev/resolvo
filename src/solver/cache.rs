@@ -1,7 +1,6 @@
 use std::{any::Any, cell::RefCell, rc::Rc};
 
 use ahash::HashMap;
-use bitvec::vec::BitVec;
 use elsa::FrozenMap;
 use event_listener::Event;
 
@@ -9,10 +8,11 @@ use crate::{
     Candidates, Dependencies, DependencyProvider, HintDependenciesAvailable, NameId, Requirement,
     SolvableId, VersionSetId,
     internal::{
-        arena::{Arena, ArenaId},
+        arena::Arena,
         frozen_copy_map::FrozenCopyMap,
         id::{CandidatesId, DependenciesId},
     },
+    solvable_id::{Frozen, Sealed, SolvableSet},
 };
 
 /// Keeps a cache of previously computed and/or requested information about
@@ -39,13 +39,13 @@ pub struct SolverCache<D: DependencyProvider> {
 
     /// A mapping from a solvable to a list of dependencies
     solvable_dependencies: Arena<DependenciesId, Dependencies>,
-    solvable_to_dependencies: FrozenCopyMap<SolvableId, DependenciesId>,
+    solvable_to_dependencies: Frozen<<D::SolvableIdLayout as Sealed>::Map<DependenciesId>>,
 
     /// A mapping that indicates that the dependencies for a particular solvable
     /// can cheaply be retrieved from the dependency provider. This
     /// information is provided by the DependencyProvider when the
     /// candidates for a package are requested.
-    hint_dependencies_available: RefCell<BitVec>,
+    hint_dependencies_available: RefCell<<D::SolvableIdLayout as Sealed>::Set<SolvableId>>,
 }
 
 impl<D: DependencyProvider> SolverCache<D> {
@@ -131,12 +131,8 @@ impl<D: DependencyProvider> SolverCache<D> {
                                     HintDependenciesAvailable::All => &candidates.candidates,
                                     HintDependenciesAvailable::Some(candidates) => candidates,
                                 };
-                            for hint_candidate in dependencies_available_candidates.iter() {
-                                let idx = hint_candidate.to_usize();
-                                if hint_dependencies_available.len() <= idx {
-                                    hint_dependencies_available.resize(idx + 1, false);
-                                }
-                                hint_dependencies_available.set(idx, true)
+                            for &hint_candidate in dependencies_available_candidates.iter() {
+                                hint_dependencies_available.insert(hint_candidate);
                             }
                         }
 
@@ -341,7 +337,7 @@ impl<D: DependencyProvider> SolverCache<D> {
         &self,
         solvable_id: SolvableId,
     ) -> Result<&Dependencies, Box<dyn Any>> {
-        let dependencies_id = match self.solvable_to_dependencies.get_copy(&solvable_id) {
+        let dependencies_id = match self.solvable_to_dependencies.get(solvable_id) {
             Some(id) => id,
             None => {
                 // Since getting the dependencies from the provider is a potentially blocking
@@ -354,7 +350,7 @@ impl<D: DependencyProvider> SolverCache<D> {
                 let dependencies = self.provider.get_dependencies(solvable_id).await;
                 let dependencies_id = self.solvable_dependencies.alloc(dependencies);
                 self.solvable_to_dependencies
-                    .insert_copy(solvable_id, dependencies_id);
+                    .insert(solvable_id, dependencies_id);
                 dependencies_id
             }
         };
@@ -367,16 +363,10 @@ impl<D: DependencyProvider> SolverCache<D> {
     /// the dependencies for a solvable are available or the dependencies
     /// have already been requested.
     pub fn are_dependencies_available_for(&self, solvable: SolvableId) -> bool {
-        if self.solvable_to_dependencies.get_copy(&solvable).is_some() {
+        if self.solvable_to_dependencies.get(solvable).is_some() {
             true
         } else {
-            let solvable_idx = solvable.to_usize();
-            let hint_dependencies_available = self.hint_dependencies_available.borrow();
-            let value = hint_dependencies_available
-                .get(solvable_idx)
-                .as_deref()
-                .copied();
-            value.unwrap_or(false)
+            self.hint_dependencies_available.borrow().contains(solvable)
         }
     }
 }

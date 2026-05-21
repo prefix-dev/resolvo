@@ -14,6 +14,7 @@ use crate::{
         id::{ClauseId, SolvableOrRootId, VariableId},
         indexed_set::IndexedSet,
     },
+    solvable_id::SolvableSet,
     solver::{conditions::Disjunction, decision::Decision},
 };
 
@@ -29,7 +30,7 @@ use crate::{
 /// The encoder itself is completely single threaded (and not `Send`) but the
 /// dependency provider is free to spawn tasks on other threads.
 pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
-    state: &'a mut SolverState<D::SolvableStorage>,
+    state: &'a mut SolverState<D::SolvableIdLayout>,
     cache: &'cache SolverCache<D>,
     level: u32,
 
@@ -104,7 +105,7 @@ struct ConstraintCandidatesAvailable<'a> {
 
 impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     pub fn new(
-        state: &'a mut SolverState<D::SolvableStorage>,
+        state: &'a mut SolverState<D::SolvableIdLayout>,
         cache: &'cache SolverCache<D>,
         root_dependencies: &'cache Dependencies,
         level: u32,

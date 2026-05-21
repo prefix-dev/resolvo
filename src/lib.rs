@@ -17,6 +17,7 @@ pub(crate) mod internal;
 mod requirement;
 pub mod runtime;
 pub mod snapshot;
+pub mod solvable_id;
 mod solver;
 pub mod utils;
 
@@ -33,10 +34,7 @@ pub use internal::id::{
 };
 use itertools::Itertools;
 pub use requirement::Requirement;
-pub use solver::{
-    Problem, Solver, SolverCache, UnsolvableOrCancelled,
-    variable_map::{DenseSolvableStorage, SolvableStorage, SparseSolvableStorage},
-};
+pub use solver::{Problem, Solver, SolverCache, UnsolvableOrCancelled};
 pub use utils::{Mapping, MappingIter};
 
 /// An object that is used by the solver to query certain properties of
@@ -120,15 +118,13 @@ pub trait Interner {
 /// solver to access the packages that are available in the system.
 #[allow(async_fn_in_trait)]
 pub trait DependencyProvider: Sized + Interner {
-    /// Controls the data structure used to map `SolvableId`s to solver
-    /// variables. Use [`DenseSolvableStorage`] when IDs are sequential from 0 (the
-    /// common case with a single pool), or [`SparseSolvableStorage`] when the pool
-    /// is large but only a fraction of solvables are visited during solving.
-    // NOTE: once `generic_const_exprs` stabilizes, this could become
-    // `const DENSE_SOLVABLE_IDS: bool = false;` — providers would just set a
-    // bool instead of importing a type, and the solver would use
-    // `SolverState<{ D::DENSE_SOLVABLE_IDS }>` internally.
-    type SolvableStorage: SolvableStorage;
+    /// Describes how this provider allocates [`SolvableId`]s. The solver uses
+    /// this hint purely as an optimization; correctness is unaffected.
+    ///
+    /// Use [`solvable_id::Dense`] when `SolvableId`s are allocated
+    /// contiguously from 0 (the common case with a single pool). If you are
+    /// unsure, use [`solvable_id::Sparse`].
+    type SolvableIdLayout: solvable_id::Layout;
 
     /// Given a set of solvables, return the candidates that match the given
     /// version set or if `inverse` is true, the candidates that do *not* match

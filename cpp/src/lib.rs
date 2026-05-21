@@ -532,7 +532,8 @@ impl resolvo::Interner for &DependencyProvider {
 }
 
 impl resolvo::DependencyProvider for &DependencyProvider {
-    type SolvableStorage = resolvo::SparseSolvableStorage;
+    // TODO: FIgure out how we can expose this option to the C++ side.
+    type SolvableIdLayout = resolvo::solvable_id::Sparse;
 
     async fn filter_candidates(
         &self,

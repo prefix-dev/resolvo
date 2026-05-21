@@ -14,12 +14,10 @@ use crate::{
         arena::{Arena, ArenaId},
         id::{ClauseId, LearntClauseId, StringId, VersionSetId},
     },
+    solvable_id,
     solver::{
-        VariableId,
-        conditions::DisjunctionId,
-        decision_map::DecisionMap,
-        decision_tracker::DecisionTracker,
-        variable_map::{SolvableStorage, VariableMap},
+        VariableId, conditions::DisjunctionId, decision_map::DecisionMap,
+        decision_tracker::DecisionTracker, variable_map::VariableMap,
     },
 };
 
@@ -357,11 +355,11 @@ impl Clause {
     }
 
     /// Construct a [`ClauseDisplay`] to display the clause.
-    pub fn display<'i, SS: SolvableStorage, I: Interner>(
+    pub fn display<'i, L: solvable_id::Layout, I: Interner>(
         &self,
-        variable_map: &'i VariableMap<SS>,
+        variable_map: &'i VariableMap<L>,
         interner: &'i I,
-    ) -> ClauseDisplay<'i, SS, I> {
+    ) -> ClauseDisplay<'i, L, I> {
         ClauseDisplay {
             kind: *self,
             variable_map,
@@ -613,13 +611,13 @@ impl VariableId {
 }
 
 /// A representation of a clause that implements [`Debug`]
-pub(crate) struct ClauseDisplay<'i, SS: SolvableStorage, I: Interner> {
+pub(crate) struct ClauseDisplay<'i, L: solvable_id::Layout, I: Interner> {
     kind: Clause,
     interner: &'i I,
-    variable_map: &'i VariableMap<SS>,
+    variable_map: &'i VariableMap<L>,
 }
 
-impl<SS: SolvableStorage, I: Interner> Display for ClauseDisplay<'_, SS, I> {
+impl<L: solvable_id::Layout, I: Interner> Display for ClauseDisplay<'_, L, I> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             Clause::InstallRoot => write!(f, "InstallRoot"),
