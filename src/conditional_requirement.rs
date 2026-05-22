@@ -1,4 +1,4 @@
-use crate::{Requirement, VersionSetId, VersionSetUnionId, internal::id::ConditionId};
+use crate::{ConditionId, Requirement, VersionSetId, VersionSetUnionId};
 
 /// A [`ConditionalRequirement`] is a requirement that is only enforced when a
 /// certain condition holds.

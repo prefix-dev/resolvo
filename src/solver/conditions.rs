@@ -61,22 +61,20 @@
 use std::num::NonZero;
 
 use crate::solver::clause::Literal;
-use crate::{
-    Condition, ConditionId, Interner, LogicalOperator, VersionSetId, internal::arena::ArenaId,
-};
+use crate::{Condition, ConditionId, DenseIndex, Interner, LogicalOperator, VersionSetId};
 
 /// An identifier that describes a group of version sets that are combined using
 /// AND logical operators.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct DisjunctionId(NonZero<u32>);
 
-impl ArenaId for DisjunctionId {
-    fn from_usize(x: usize) -> Self {
+impl DenseIndex for DisjunctionId {
+    fn from_index(x: usize) -> Self {
         // Safe because we are guaranteed that the id is non-zero by adding 1.
         DisjunctionId(unsafe { NonZero::new_unchecked((x + 1) as u32) })
     }
 
-    fn to_usize(self) -> usize {
+    fn to_index(self) -> usize {
         (self.0.get() - 1) as usize
     }
 }

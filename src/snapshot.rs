@@ -15,11 +15,9 @@ use ahash::HashSet;
 use futures::FutureExt;
 
 use crate::{
-    Candidates, Condition, Dependencies, DependencyProvider, HintDependenciesAvailable, Interner,
-    Mapping, NameId, Requirement, SolvableId, SolverCache, StringId, VersionSetId,
-    VersionSetUnionId,
-    internal::{arena::ArenaId, id::ConditionId},
-    solvable_id,
+    Candidates, Condition, ConditionId, DenseIndex, Dependencies, DependencyProvider,
+    HintDependenciesAvailable, Interner, Mapping, NameId, Requirement, SolvableId, SolverCache,
+    StringId, VersionSetId, VersionSetUnionId,
 };
 
 /// A single solvable in a [`DependencySnapshot`].
@@ -134,7 +132,7 @@ impl DependencySnapshot {
     /// want to construct a snapshot from a provider that might yield, use
     /// [`Self::from_provider_async`] instead.
     pub fn from_provider(
-        provider: impl DependencyProvider,
+        provider: impl DependencyProvider<NameId = NameId, SolvableId = SolvableId>,
         names: impl IntoIterator<Item = NameId>,
         version_sets: impl IntoIterator<Item = VersionSetId>,
         solvables: impl IntoIterator<Item = SolvableId>,
@@ -151,7 +149,7 @@ impl DependencySnapshot {
     /// methods on the provider with the given `names`, `version_sets`, and
     /// `solvables`.
     pub async fn from_provider_async(
-        provider: impl DependencyProvider,
+        provider: impl DependencyProvider<NameId = NameId, SolvableId = SolvableId>,
         names: impl IntoIterator<Item = NameId>,
         version_sets: impl IntoIterator<Item = VersionSetId>,
         solvables: impl IntoIterator<Item = SolvableId>,
@@ -416,7 +414,7 @@ impl<'s> SnapshotProvider<'s> {
             matching_candidates,
         });
 
-        VersionSetId::from_usize(id)
+        VersionSetId::from_index(id)
     }
 
     fn solvable(&self, solvable: SolvableId) -> &Solvable {
@@ -441,7 +439,7 @@ impl<'s> SnapshotProvider<'s> {
     }
 
     fn version_set(&self, version_set: VersionSetId) -> &VersionSet {
-        let idx = version_set.to_usize();
+        let idx = version_set.to_index();
         let max_idx = self.snapshot.version_sets.max();
         if idx >= max_idx {
             &self.additional_version_sets[idx - max_idx]
@@ -455,6 +453,9 @@ impl<'s> SnapshotProvider<'s> {
 }
 
 impl Interner for SnapshotProvider<'_> {
+    type NameId = NameId;
+    type SolvableId = SolvableId;
+
     fn display_solvable(&self, solvable: SolvableId) -> impl Display + '_ {
         &self.solvable(solvable).display
     }
@@ -501,8 +502,6 @@ impl Interner for SnapshotProvider<'_> {
 }
 
 impl DependencyProvider for SnapshotProvider<'_> {
-    type SolvableIdLayout = solvable_id::Sparse;
-
     async fn filter_candidates(
         &self,
         candidates: &[SolvableId],

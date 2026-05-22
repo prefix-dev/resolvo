@@ -9,15 +9,14 @@ use elsa::FrozenMap;
 
 use crate::solver::conditions::Disjunction;
 use crate::{
-    Interner, NameId, Requirement,
+    DenseIndex, Interner, Requirement, SolverId, StringId, VariableId, VersionSetId,
     internal::{
-        arena::{Arena, ArenaId},
-        id::{ClauseId, LearntClauseId, StringId, VersionSetId},
+        arena::Arena,
+        id::{ClauseId, LearntClauseId},
     },
-    solvable_id,
     solver::{
-        VariableId, conditions::DisjunctionId, decision_map::DecisionMap,
-        decision_tracker::DecisionTracker, variable_map::VariableMap,
+        conditions::DisjunctionId, decision_map::DecisionMap, decision_tracker::DecisionTracker,
+        variable_map::VariableMap,
     },
 };
 
@@ -49,7 +48,7 @@ use crate::{
 /// dependency resolution problem, and we try to keep the [`Clause`] enum small.
 /// A naive implementation would store a `Vec<Literal>`.
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum Clause {
+pub(crate) enum Clause<N> {
     /// An assertion that the root solvable must be installed
     ///
     /// In SAT terms: (root)
@@ -71,7 +70,7 @@ pub(crate) enum Clause {
     /// itself forbids two solvables from being installed at the same time.
     ///
     /// In SAT terms: (¬A ∨ ¬B)
-    ForbidMultipleInstances(VariableId, Literal, NameId),
+    ForbidMultipleInstances(VariableId, Literal, N),
     /// Forbids packages that do not satisfy a solvable's constrains
     ///
     /// Usage: for each constrains relationship in a package, determine all the
@@ -109,7 +108,7 @@ pub(crate) enum Clause {
     AnyOf(VariableId, VariableId),
 }
 
-impl Clause {
+impl<N> Clause<N> {
     /// Returns `true` if the clause has exactly two literals that can never
     /// change. The propagation loop relies on this to skip the
     /// `next_unwatched_literal` scan, which can never succeed for such
@@ -125,7 +124,7 @@ impl Clause {
     }
 }
 
-impl Clause {
+impl<N: SolverId> Clause<N> {
     /// Returns the building blocks needed for a new [WatchedLiterals] of the
     /// [Clause::Requires] kind.
     ///
@@ -224,7 +223,7 @@ impl Clause {
     fn forbid_multiple(
         candidate: VariableId,
         constrained_candidate: Literal,
-        name: NameId,
+        name: N,
     ) -> (Self, Option<[Literal; 2]>) {
         (
             Clause::ForbidMultipleInstances(candidate, constrained_candidate, name),
@@ -355,11 +354,11 @@ impl Clause {
     }
 
     /// Construct a [`ClauseDisplay`] to display the clause.
-    pub fn display<'i, L: solvable_id::Layout, I: Interner>(
+    pub fn display<'i, I: Interner<NameId = N>>(
         &self,
-        variable_map: &'i VariableMap<L>,
+        variable_map: &'i VariableMap<I::NameId, I::SolvableId>,
         interner: &'i I,
-    ) -> ClauseDisplay<'i, L, I> {
+    ) -> ClauseDisplay<'i, I> {
         ClauseDisplay {
             kind: *self,
             variable_map,
@@ -389,7 +388,7 @@ pub(crate) struct WatchedLiterals {
 impl WatchedLiterals {
     /// Shorthand method to construct a [`Clause::InstallRoot`] without
     /// requiring complicated arguments.
-    pub fn root() -> (Option<Self>, Clause) {
+    pub fn root<N: SolverId>() -> (Option<Self>, Clause<N>) {
         let (kind, watched_literals) = Clause::root();
         (Self::from_kind_and_initial_watches(watched_literals), kind)
     }
@@ -399,13 +398,13 @@ impl WatchedLiterals {
     ///
     /// The returned boolean value is true when adding the clause resulted in a
     /// conflict.
-    pub fn requires(
+    pub fn requires<N: SolverId>(
         candidate: VariableId,
         requirement: Requirement,
         matching_candidates: impl IntoIterator<Item = VariableId>,
         condition: Option<(DisjunctionId, &[Literal])>,
         decision_tracker: &DecisionTracker,
-    ) -> (Option<Self>, bool, Clause) {
+    ) -> (Option<Self>, bool, Clause<N>) {
         let (kind, watched_literals, conflict) = Clause::requires(
             candidate,
             requirement,
@@ -426,12 +425,12 @@ impl WatchedLiterals {
     ///
     /// The returned boolean value is true when adding the clause resulted in a
     /// conflict.
-    pub fn constrains(
+    pub fn constrains<N: SolverId>(
         candidate: VariableId,
         constrained_package: VariableId,
         requirement: VersionSetId,
         decision_tracker: &DecisionTracker,
-    ) -> (Option<Self>, bool, Clause) {
+    ) -> (Option<Self>, bool, Clause<N>) {
         let (kind, watched_literals, conflict) = Clause::constrains(
             candidate,
             constrained_package,
@@ -446,37 +445,43 @@ impl WatchedLiterals {
         )
     }
 
-    pub fn lock(
+    pub fn lock<N: SolverId>(
         locked_candidate: VariableId,
         other_candidate: VariableId,
-    ) -> (Option<Self>, Clause) {
+    ) -> (Option<Self>, Clause<N>) {
         let (kind, watched_literals) = Clause::lock(locked_candidate, other_candidate);
         (Self::from_kind_and_initial_watches(watched_literals), kind)
     }
 
-    pub fn forbid_multiple(
+    pub fn forbid_multiple<N: SolverId>(
         candidate: VariableId,
         other_candidate: Literal,
-        name: NameId,
-    ) -> (Option<Self>, Clause) {
+        name: N,
+    ) -> (Option<Self>, Clause<N>) {
         let (kind, watched_literals) = Clause::forbid_multiple(candidate, other_candidate, name);
         (Self::from_kind_and_initial_watches(watched_literals), kind)
     }
 
-    pub fn learnt(
+    pub fn learnt<N: SolverId>(
         learnt_clause_id: LearntClauseId,
         literals: &[Literal],
-    ) -> (Option<Self>, Clause) {
+    ) -> (Option<Self>, Clause<N>) {
         let (kind, watched_literals) = Clause::learnt(learnt_clause_id, literals);
         (Self::from_kind_and_initial_watches(watched_literals), kind)
     }
 
-    pub fn exclude(candidate: VariableId, reason: StringId) -> (Option<Self>, Clause) {
+    pub fn exclude<N: SolverId>(
+        candidate: VariableId,
+        reason: StringId,
+    ) -> (Option<Self>, Clause<N>) {
         let (kind, watched_literals) = Clause::exclude(candidate, reason);
         (Self::from_kind_and_initial_watches(watched_literals), kind)
     }
 
-    pub fn any_of(selected_var: VariableId, other_var: VariableId) -> (Option<Self>, Clause) {
+    pub fn any_of<N: SolverId>(
+        selected_var: VariableId,
+        other_var: VariableId,
+    ) -> (Option<Self>, Clause<N>) {
         let (kind, watched_literals) = Clause::any_of(selected_var, other_var);
         (Self::from_kind_and_initial_watches(watched_literals), kind)
     }
@@ -490,9 +495,9 @@ impl WatchedLiterals {
         })
     }
 
-    pub fn next_unwatched_literal(
+    pub fn next_unwatched_literal<N: SolverId>(
         &self,
-        clause: &Clause,
+        clause: &Clause<N>,
         learnt_clauses: &Arena<LearntClauseId, Vec<Literal>>,
         requirement_to_sorted_candidates: &FrozenMap<
             Requirement,
@@ -550,20 +555,20 @@ impl Literal {
     /// Constructs a new [`Literal`] from a [`VariableId`] and a boolean
     /// indicating whether the literal should be negated.
     pub fn new(variable: VariableId, negate: bool) -> Self {
-        let variable_idx = variable.to_usize();
+        let variable_idx = variable.to_index();
         let encoded_literal = variable_idx << 1 | negate as usize;
-        Self::from_usize(encoded_literal)
+        Self::from_index(encoded_literal)
     }
 }
 
-impl ArenaId for Literal {
-    fn from_usize(x: usize) -> Self {
+impl DenseIndex for Literal {
+    fn from_index(x: usize) -> Self {
         let idx: u32 = (x + 1).try_into().expect("watched literal id too big");
         // SAFETY: This is safe because we are adding 1 to the index
         unsafe { Literal(NonZeroU32::new_unchecked(idx)) }
     }
 
-    fn to_usize(self) -> usize {
+    fn to_index(self) -> usize {
         self.0.get() as usize - 1
     }
 }
@@ -583,7 +588,7 @@ impl Literal {
     /// assigned to the literal's solvable
     #[inline]
     pub(crate) fn variable(self) -> VariableId {
-        VariableId::from_usize(self.to_usize() >> 1)
+        VariableId::from_index(self.to_index() >> 1)
     }
 
     /// Evaluates the literal, or returns `None` if no value has been assigned
@@ -611,13 +616,13 @@ impl VariableId {
 }
 
 /// A representation of a clause that implements [`Debug`]
-pub(crate) struct ClauseDisplay<'i, L: solvable_id::Layout, I: Interner> {
-    kind: Clause,
+pub(crate) struct ClauseDisplay<'i, I: Interner> {
+    kind: Clause<I::NameId>,
     interner: &'i I,
-    variable_map: &'i VariableMap<L>,
+    variable_map: &'i VariableMap<I::NameId, I::SolvableId>,
 }
 
-impl<L: solvable_id::Layout, I: Interner> Display for ClauseDisplay<'_, L, I> {
+impl<I: Interner> Display for ClauseDisplay<'_, I> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.kind {
             Clause::InstallRoot => write!(f, "InstallRoot"),
@@ -690,7 +695,7 @@ impl<L: solvable_id::Layout, I: Interner> Display for ClauseDisplay<'_, L, I> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{internal::arena::ArenaId, solver::decision::Decision};
+    use crate::{DenseIndex, solver::decision::Decision};
 
     #[test]
     #[allow(clippy::bool_assert_comparison)]
@@ -727,14 +732,14 @@ mod test {
     fn test_requires_with_and_without_conflict() {
         let mut decisions = DecisionTracker::default();
 
-        let parent = VariableId::from_usize(1);
-        let candidate1 = VariableId::from_usize(2);
-        let candidate2 = VariableId::from_usize(3);
+        let parent = VariableId::from_index(1);
+        let candidate1 = VariableId::from_index(2);
+        let candidate2 = VariableId::from_index(3);
 
         // No conflict, all candidates available
-        let (clause, conflict, _kind) = WatchedLiterals::requires(
+        let (clause, conflict, _kind) = WatchedLiterals::requires::<crate::NameId>(
             parent,
-            VersionSetId::from_usize(0).into(),
+            VersionSetId::from_index(0).into(),
             [candidate1, candidate2],
             None,
             &decisions,
@@ -748,11 +753,11 @@ mod test {
 
         // No conflict, still one candidate available
         decisions
-            .try_add_decision(Decision::new(candidate1, false, ClauseId::from_usize(0)), 1)
+            .try_add_decision(Decision::new(candidate1, false, ClauseId::from_index(0)), 1)
             .unwrap();
-        let (clause, conflict, _kind) = WatchedLiterals::requires(
+        let (clause, conflict, _kind) = WatchedLiterals::requires::<crate::NameId>(
             parent,
-            VersionSetId::from_usize(0).into(),
+            VersionSetId::from_index(0).into(),
             [candidate1, candidate2],
             None,
             &decisions,
@@ -774,9 +779,9 @@ mod test {
                 1,
             )
             .unwrap();
-        let (clause, conflict, _kind) = WatchedLiterals::requires(
+        let (clause, conflict, _kind) = WatchedLiterals::requires::<crate::NameId>(
             parent,
-            VersionSetId::from_usize(0).into(),
+            VersionSetId::from_index(0).into(),
             [candidate1, candidate2],
             None,
             &decisions,
@@ -796,9 +801,9 @@ mod test {
             .try_add_decision(Decision::new(parent, false, ClauseId::install_root()), 1)
             .unwrap();
         let panicked = std::panic::catch_unwind(|| {
-            WatchedLiterals::requires(
+            WatchedLiterals::requires::<crate::NameId>(
                 parent,
-                VersionSetId::from_usize(0).into(),
+                VersionSetId::from_index(0).into(),
                 [candidate1, candidate2],
                 None,
                 &decisions,
@@ -812,12 +817,16 @@ mod test {
     fn test_constrains_with_and_without_conflict() {
         let mut decisions = DecisionTracker::default();
 
-        let parent = VariableId::from_usize(1);
-        let forbidden = VariableId::from_usize(2);
+        let parent = VariableId::from_index(1);
+        let forbidden = VariableId::from_index(2);
 
         // No conflict, forbidden package not installed
-        let (clause, conflict, _kind) =
-            WatchedLiterals::constrains(parent, forbidden, VersionSetId::from_usize(0), &decisions);
+        let (clause, conflict, _kind) = WatchedLiterals::constrains::<crate::NameId>(
+            parent,
+            forbidden,
+            VersionSetId::from_index(0),
+            &decisions,
+        );
         assert!(!conflict);
         assert_eq!(
             clause.as_ref().unwrap().watched_literals[0].variable(),
@@ -832,8 +841,12 @@ mod test {
         decisions
             .try_add_decision(Decision::new(forbidden, true, ClauseId::install_root()), 1)
             .unwrap();
-        let (clause, conflict, _kind) =
-            WatchedLiterals::constrains(parent, forbidden, VersionSetId::from_usize(0), &decisions);
+        let (clause, conflict, _kind) = WatchedLiterals::constrains::<crate::NameId>(
+            parent,
+            forbidden,
+            VersionSetId::from_index(0),
+            &decisions,
+        );
         assert!(conflict);
         assert_eq!(
             clause.as_ref().unwrap().watched_literals[0].variable(),
@@ -849,7 +862,12 @@ mod test {
             .try_add_decision(Decision::new(parent, false, ClauseId::install_root()), 1)
             .unwrap();
         let panicked = std::panic::catch_unwind(|| {
-            WatchedLiterals::constrains(parent, forbidden, VersionSetId::from_usize(0), &decisions)
+            WatchedLiterals::constrains::<crate::NameId>(
+                parent,
+                forbidden,
+                VersionSetId::from_index(0),
+                &decisions,
+            )
         })
         .is_err();
         assert!(panicked);
@@ -898,12 +916,13 @@ mod test {
         // The Clause enum should be kept small since we create thousands of instances.
         // Asserted exactly to catch both growth (worse cache) and silent shrinkage
         // (which would mean a variant got smaller and the bound is now loose).
-        assert_eq!(std::mem::size_of::<Clause>(), 16);
+        assert_eq!(std::mem::size_of::<Clause<crate::NameId>>(), 16);
     }
 
     #[test]
     fn test_key_type_sizes() {
         use crate::internal::id::*;
+        use crate::{NameId, SolvableId};
         eprintln!("=== Key type sizes ===");
         eprintln!("VariableId: {} bytes", std::mem::size_of::<VariableId>());
         eprintln!("ClauseId: {} bytes", std::mem::size_of::<ClauseId>());
@@ -927,7 +946,8 @@ mod test {
         );
         eprintln!(
             "Clause + WatchedLiterals per clause: {} bytes",
-            std::mem::size_of::<Clause>() + std::mem::size_of::<Option<WatchedLiterals>>()
+            std::mem::size_of::<Clause<crate::NameId>>()
+                + std::mem::size_of::<Option<WatchedLiterals>>()
         );
     }
 }

@@ -1,18 +1,17 @@
-use std::{any::Any, cell::RefCell, rc::Rc};
-
 use ahash::HashMap;
 use elsa::FrozenMap;
 use event_listener::Event;
+use std::{any::Any, cell::RefCell, rc::Rc};
 
 use crate::{
-    Candidates, Dependencies, DependencyProvider, HintDependenciesAvailable, NameId, Requirement,
-    SolvableId, VersionSetId,
+    Candidates, Dependencies, DependencyProvider, HintDependenciesAvailable, Requirement,
+    VersionSetId,
     internal::{
         arena::Arena,
-        frozen_copy_map::FrozenCopyMap,
         id::{CandidatesId, DependenciesId},
+        solver_id::Frozen,
     },
-    solvable_id::{Frozen, Sealed, SolvableSet},
+    solver_id::{IdSet, SolverId},
 };
 
 /// Keeps a cache of previously computed and/or requested information about
@@ -21,31 +20,32 @@ pub struct SolverCache<D: DependencyProvider> {
     provider: D,
 
     /// A mapping from package name to a list of candidates.
-    candidates: Arena<CandidatesId, Candidates>,
-    package_name_to_candidates: FrozenCopyMap<NameId, CandidatesId>,
-    package_name_to_candidates_in_flight: RefCell<HashMap<NameId, Rc<Event>>>,
+    candidates: Arena<CandidatesId, Candidates<D::SolvableId>>,
+    package_name_to_candidates: Frozen<<D::NameId as SolverId>::Map<Option<CandidatesId>>>,
+    package_name_to_candidates_in_flight: RefCell<HashMap<D::NameId, Rc<Event>>>,
 
     /// A mapping of `VersionSetId` to the candidates that match that set.
-    version_set_candidates: FrozenMap<VersionSetId, Vec<SolvableId>, ahash::RandomState>,
+    version_set_candidates: FrozenMap<VersionSetId, Vec<D::SolvableId>, ahash::RandomState>,
 
     /// A mapping of `VersionSetId` to the candidates that do not match that set
     /// (only candidates of the package indicated by the version set are
     /// included).
-    version_set_inverse_candidates: FrozenMap<VersionSetId, Vec<SolvableId>, ahash::RandomState>,
+    version_set_inverse_candidates: FrozenMap<VersionSetId, Vec<D::SolvableId>, ahash::RandomState>,
 
     /// A mapping of [`Requirement`] to a sorted list of candidates that fulfill
     /// that requirement.
-    requirement_to_sorted_candidates: FrozenMap<Requirement, Vec<SolvableId>, ahash::RandomState>,
+    requirement_to_sorted_candidates:
+        FrozenMap<Requirement, Vec<D::SolvableId>, ahash::RandomState>,
 
     /// A mapping from a solvable to a list of dependencies
     solvable_dependencies: Arena<DependenciesId, Dependencies>,
-    solvable_to_dependencies: Frozen<<D::SolvableIdLayout as Sealed>::Map<DependenciesId>>,
+    solvable_to_dependencies: Frozen<<D::SolvableId as SolverId>::Map<Option<DependenciesId>>>,
 
     /// A mapping that indicates that the dependencies for a particular solvable
     /// can cheaply be retrieved from the dependency provider. This
     /// information is provided by the DependencyProvider when the
     /// candidates for a package are requested.
-    hint_dependencies_available: RefCell<<D::SolvableIdLayout as Sealed>::Set<SolvableId>>,
+    hint_dependencies_available: RefCell<<D::SolvableId as SolverId>::Set>,
 }
 
 impl<D: DependencyProvider> SolverCache<D> {
@@ -78,11 +78,11 @@ impl<D: DependencyProvider> SolverCache<D> {
     /// cancellation value will be returned as an `Err(...)`.
     pub async fn get_or_cache_candidates(
         &self,
-        package_name: NameId,
-    ) -> Result<&Candidates, Box<dyn Any>> {
+        package_name: D::NameId,
+    ) -> Result<&Candidates<D::SolvableId>, Box<dyn Any>> {
         // If we already have the candidates for this package cached we can simply
         // return
-        let candidates_id = match self.package_name_to_candidates.get_copy(&package_name) {
+        let candidates_id = match self.package_name_to_candidates.get(package_name) {
             Some(id) => id,
             None => {
                 // Since getting the candidates from the provider is a potentially blocking
@@ -104,7 +104,7 @@ impl<D: DependencyProvider> SolverCache<D> {
                         // the computed result.
                         in_flight.listen().await;
                         self.package_name_to_candidates
-                            .get_copy(&package_name)
+                            .get(package_name)
                             .expect("after waiting for a request the result should be available")
                     }
                     None => {
@@ -139,7 +139,7 @@ impl<D: DependencyProvider> SolverCache<D> {
                         // Allocate an ID so we can refer to the candidates from everywhere
                         let candidates_id = self.candidates.alloc(candidates);
                         self.package_name_to_candidates
-                            .insert_copy(package_name, candidates_id);
+                            .set(package_name, Some(candidates_id));
 
                         // Remove the in-flight request now that we inserted the result and notify
                         // any waiters
@@ -168,7 +168,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_matching_candidates(
         &self,
         version_set_id: VersionSetId,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[D::SolvableId], Box<dyn Any>> {
         match self.version_set_candidates.get(&version_set_id) {
             Some(candidates) => Ok(candidates),
             None => {
@@ -206,7 +206,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_non_matching_candidates(
         &self,
         version_set_id: VersionSetId,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[D::SolvableId], Box<dyn Any>> {
         match self.version_set_inverse_candidates.get(&version_set_id) {
             Some(candidates) => Ok(candidates),
             None => {
@@ -223,7 +223,7 @@ impl<D: DependencyProvider> SolverCache<D> {
                     candidates.candidates.len()
                 );
 
-                let matching_candidates: Vec<SolvableId> = self
+                let matching_candidates: Vec<D::SolvableId> = self
                     .provider
                     .filter_candidates(&candidates.candidates, version_set_id, true)
                     .await
@@ -251,7 +251,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub async fn get_or_cache_sorted_candidates(
         &self,
         requirement: Requirement,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[D::SolvableId], Box<dyn Any>> {
         match requirement {
             Requirement::Single(version_set_id) => {
                 self.get_or_cache_sorted_candidates_for_version_set(version_set_id)
@@ -290,7 +290,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     pub(crate) async fn get_or_cache_sorted_candidates_for_version_set(
         &self,
         version_set_id: VersionSetId,
-    ) -> Result<&[SolvableId], Box<dyn Any>> {
+    ) -> Result<&[D::SolvableId], Box<dyn Any>> {
         let requirement = version_set_id.into();
         if let Some(candidates) = self.requirement_to_sorted_candidates.get(&requirement) {
             return Ok(candidates);
@@ -335,7 +335,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     /// cancellation value will be returned as an `Err(...)`.
     pub async fn get_or_cache_dependencies(
         &self,
-        solvable_id: SolvableId,
+        solvable_id: D::SolvableId,
     ) -> Result<&Dependencies, Box<dyn Any>> {
         let dependencies_id = match self.solvable_to_dependencies.get(solvable_id) {
             Some(id) => id,
@@ -350,7 +350,7 @@ impl<D: DependencyProvider> SolverCache<D> {
                 let dependencies = self.provider.get_dependencies(solvable_id).await;
                 let dependencies_id = self.solvable_dependencies.alloc(dependencies);
                 self.solvable_to_dependencies
-                    .insert(solvable_id, dependencies_id);
+                    .set(solvable_id, Some(dependencies_id));
                 dependencies_id
             }
         };
@@ -362,7 +362,7 @@ impl<D: DependencyProvider> SolverCache<D> {
     /// available. This means either the dependency provider indicated that
     /// the dependencies for a solvable are available or the dependencies
     /// have already been requested.
-    pub fn are_dependencies_available_for(&self, solvable: SolvableId) -> bool {
+    pub fn are_dependencies_available_for(&self, solvable: D::SolvableId) -> bool {
         if self.solvable_to_dependencies.get(solvable).is_some() {
             true
         } else {

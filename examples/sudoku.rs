@@ -137,6 +137,9 @@ impl SudokuProvider {
 // used in error messages when a puzzle is unsolvable.
 
 impl Interner for SudokuProvider {
+    type NameId = NameId;
+    type SolvableId = SolvableId;
+
     fn display_solvable(&self, solvable: SolvableId) -> impl Display + '_ {
         let record = self.pool.resolve_solvable(solvable);
         let cell = self.names.iter().position(|&n| n == record.name).unwrap();
@@ -223,8 +226,6 @@ impl SudokuProvider {
 }
 
 impl DependencyProvider for SudokuProvider {
-    type SolvableIdLayout = resolvo::solvable_id::Dense;
-
     async fn filter_candidates(
         &self,
         candidates: &[SolvableId],

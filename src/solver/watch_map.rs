@@ -1,6 +1,6 @@
 use crate::{
-    Mapping,
-    internal::{arena::ArenaId, debug_expect_unchecked, id::ClauseId},
+    DenseIndex, Mapping,
+    internal::{debug_expect_unchecked, id::ClauseId},
     solver::clause::{Literal, WatchedLiterals},
 };
 
@@ -46,7 +46,7 @@ impl WatchMap {
         literal: Literal,
     ) -> Option<WatchMapCursor<'a>> {
         let clause_id = *self.map.get(literal)?;
-        let watched_literal = watches[clause_id.to_usize()]
+        let watched_literal = watches[clause_id.to_index()]
             .as_ref()
             .expect("no watches found for clause");
         let watch_index = if watched_literal.watched_literals[0] == literal {
@@ -122,7 +122,7 @@ impl WatchMapCursor<'_> {
     fn next_node(&self) -> Option<WatchNode> {
         let current_watch = self.watched_literals();
         let next_clause_id = current_watch.next_watches[self.current.watch_index]?;
-        let next_watch = self.watches[next_clause_id.to_usize()]
+        let next_watch = self.watches[next_clause_id.to_index()]
             .as_ref()
             .expect("watches are missing");
         let next_clause_watch_index = if next_watch.watched_literals[0] == self.literal {
@@ -151,7 +151,7 @@ impl WatchMapCursor<'_> {
         // SAFETY: Within the cursor, the current clause is always watching literals.
         unsafe {
             debug_expect_unchecked(
-                self.watches[self.current.clause_id.to_usize()].as_ref(),
+                self.watches[self.current.clause_id.to_index()].as_ref(),
                 "clause is not watching literals",
             )
         }
@@ -173,7 +173,7 @@ impl WatchMapCursor<'_> {
             "cannot update watch to the same literal"
         );
 
-        let clause_idx = self.current.clause_id.to_usize();
+        let clause_idx = self.current.clause_id.to_index();
         let next_node = self.next_node();
 
         // Update the previous node to point to the next node in the linked list
@@ -184,7 +184,7 @@ impl WatchMapCursor<'_> {
             // previous index there will also be watch literals for that clause.
             let previous_watches = unsafe {
                 debug_expect_unchecked(
-                    self.watches[previous.clause_id.to_usize()].as_mut(),
+                    self.watches[previous.clause_id.to_index()].as_mut(),
                     "previous clause has no watches",
                 )
             };

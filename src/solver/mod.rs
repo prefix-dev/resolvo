@@ -12,21 +12,21 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use variable_map::VariableMap;
 
-use crate::solvable_id::{self, SolvableSet};
 use watch_map::WatchMap;
 
 use crate::{
-    ConditionalRequirement, Dependencies, DependencyProvider, KnownDependencies, Requirement,
-    VersionSetId,
+    ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider, KnownDependencies,
+    Requirement, SolvableId, VariableId, VersionSetId,
     conflict::Conflict,
     internal::{
-        arena::{Arena, ArenaId},
-        id::{ClauseId, LearntClauseId, NameId, SolvableId, SolvableOrRootId, VariableId},
-        indexed_set::IndexedSet,
+        arena::Arena,
+        id::{ClauseId, LearntClauseId},
+        solver_id::{SolvableIdOrRoot, WithRootSet},
     },
     runtime::{AsyncRuntime, NowOrNeverRuntime},
     solver::binary_encoding::AtMostOnceTracker,
-    utils::Mapping,
+    solver_id::{IdMap, IdSet, SolverId},
+    utils::{IndexedSet, Mapping},
 };
 
 mod binary_encoding;
@@ -50,19 +50,37 @@ mod watch_map;
 ///
 /// This struct follows the builder pattern and can have its fields set by one
 /// of the available setter methods.
-pub struct Problem<S> {
+pub struct Problem<Id = SolvableId, S = EmptySolvables<Id>> {
     requirements: Vec<ConditionalRequirement>,
     constraints: Vec<VersionSetId>,
     soft_requirements: S,
+    _marker: std::marker::PhantomData<fn(Id) -> Id>,
 }
 
-impl Default for Problem<std::iter::Empty<SolvableId>> {
+/// Empty soft-requirements iterator for a [`Problem`] parameterized by an ID type.
+pub struct EmptySolvables<Id>(pub std::marker::PhantomData<fn(Id) -> Id>);
+
+impl<Id> Default for EmptySolvables<Id> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<Id> Iterator for EmptySolvables<Id> {
+    type Item = Id;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
+}
+
+impl<Id> Default for Problem<Id, EmptySolvables<Id>> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Problem<std::iter::Empty<SolvableId>> {
+impl<Id> Problem<Id, EmptySolvables<Id>> {
     /// Creates a new empty [`Problem`]. Use the setter methods to build the
     /// problem before passing it to the solver to be solved.
     pub fn new() -> Self {
@@ -70,11 +88,12 @@ impl Problem<std::iter::Empty<SolvableId>> {
             requirements: Default::default(),
             constraints: Default::default(),
             soft_requirements: Default::default(),
+            _marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<S: IntoIterator<Item = SolvableId>> Problem<S> {
+impl<Id, S: IntoIterator<Item = Id>> Problem<Id, S> {
     /// Sets the requirements that _must_ have one candidate solvable be
     /// included in the solution.
     ///
@@ -114,27 +133,40 @@ impl<S: IntoIterator<Item = SolvableId>> Problem<S> {
     ///
     /// Returns the [`Problem`] for further mutation or to pass to
     /// [`Solver::solve`].
-    pub fn soft_requirements<I: IntoIterator<Item = SolvableId>>(
+    pub fn soft_requirements<I: IntoIterator<Item = Id>>(
         self,
         soft_requirements: I,
-    ) -> Problem<I> {
+    ) -> Problem<Id, I> {
         Problem {
             requirements: self.requirements,
             constraints: self.constraints,
             soft_requirements,
+            _marker: std::marker::PhantomData,
         }
     }
 }
 
-#[derive(Default)]
-pub(crate) struct Clauses {
-    pub(crate) kinds: Vec<Clause>,
+pub(crate) struct Clauses<N> {
+    pub(crate) kinds: Vec<Clause<N>>,
     watched_literals: Vec<Option<WatchedLiterals>>,
 }
 
-impl Clauses {
-    pub fn alloc(&mut self, watched_literals: Option<WatchedLiterals>, kind: Clause) -> ClauseId {
-        let id = ClauseId::from_usize(self.kinds.len());
+impl<N> Default for Clauses<N> {
+    fn default() -> Self {
+        Self {
+            kinds: Vec::new(),
+            watched_literals: Vec::new(),
+        }
+    }
+}
+
+impl<N> Clauses<N> {
+    pub fn alloc(
+        &mut self,
+        watched_literals: Option<WatchedLiterals>,
+        kind: Clause<N>,
+    ) -> ClauseId {
+        let id = ClauseId::from_index(self.kinds.len());
         self.kinds.push(kind);
         self.watched_literals.push(watched_literals);
         id
@@ -152,7 +184,7 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
     pub(crate) cache: SolverCache<D>,
 
     /// Holds the current state of the solver.
-    pub(crate) state: SolverState<D::SolvableIdLayout>,
+    pub(crate) state: SolverState<D>,
 
     /// The activity add factor. This is a value that is added to the activity
     /// score of each package that is part of a conflict.
@@ -166,9 +198,8 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
 
 type RequiresClause = (Requirement, Option<DisjunctionId>, ClauseId);
 
-#[derive(Default)]
-pub(crate) struct SolverState<L: solvable_id::Layout> {
-    pub(crate) clauses: Clauses,
+pub(crate) struct SolverState<D: DependencyProvider> {
+    pub(crate) clauses: Clauses<D::NameId>,
     requires_clauses: IndexMap<VariableId, Vec<RequiresClause>, ahash::RandomState>,
     watches: WatchMap,
 
@@ -177,7 +208,7 @@ pub(crate) struct SolverState<L: solvable_id::Layout> {
     requirement_to_sorted_candidates:
         FrozenMap<Requirement, RequirementCandidateVariables, ahash::RandomState>,
 
-    pub(crate) variable_map: VariableMap<L>,
+    pub(crate) variable_map: VariableMap<D::NameId, D::SolvableId>,
 
     negative_assertions: Vec<(VariableId, ClauseId)>,
 
@@ -187,21 +218,46 @@ pub(crate) struct SolverState<L: solvable_id::Layout> {
 
     disjunctions: Arena<DisjunctionId, Disjunction>,
 
-    clauses_added_for_package: IndexedSet<NameId>,
-    clauses_added_for_solvable: <L as solvable_id::Sealed>::Set<SolvableOrRootId>,
-    at_most_one_trackers: HashMap<NameId, AtMostOnceTracker<VariableId>>,
+    clauses_added_for_package: <D::NameId as SolverId>::Set,
+    clauses_added_for_solvable: WithRootSet<D::SolvableId>,
+    at_most_one_trackers: HashMap<D::NameId, AtMostOnceTracker<VariableId>>,
 
     /// Keeps track of auxiliary variables that are used to encode at-least-one
     /// solvable for a package.
-    at_least_one_tracker: HashMap<NameId, VariableId>,
+    at_least_one_tracker: <D::NameId as SolverId>::Map<Option<VariableId>>,
 
     pub(crate) decision_tracker: DecisionTracker,
 
     /// Activity score per package.
-    name_activity: Vec<f32>,
+    name_activity: <D::NameId as SolverId>::Map<f32>,
 
     #[cfg(feature = "diagnostics")]
     propagation_counters: PropagationCounters,
+}
+
+impl<D: DependencyProvider> Default for SolverState<D> {
+    fn default() -> Self {
+        Self {
+            clauses: Default::default(),
+            requires_clauses: Default::default(),
+            watches: Default::default(),
+            requirement_to_sorted_candidates: Default::default(),
+            variable_map: Default::default(),
+            negative_assertions: Default::default(),
+            learnt_clauses: Default::default(),
+            learnt_why: Default::default(),
+            learnt_clause_ids: Default::default(),
+            disjunctions: Default::default(),
+            clauses_added_for_package: Default::default(),
+            clauses_added_for_solvable: Default::default(),
+            at_most_one_trackers: Default::default(),
+            at_least_one_tracker: Default::default(),
+            decision_tracker: Default::default(),
+            name_activity: Default::default(),
+            #[cfg(feature = "diagnostics")]
+            propagation_counters: Default::default(),
+        }
+    }
 }
 
 /// Counters that track propagation loop behavior for performance analysis.
@@ -245,7 +301,7 @@ pub(crate) struct PropagationVisitsByType {
 
 #[cfg(feature = "diagnostics")]
 impl PropagationVisitsByType {
-    fn count(&mut self, clause: &Clause) {
+    fn count<N>(&mut self, clause: &Clause<N>) {
         match clause {
             Clause::Requires(..) => self.requires += 1,
             Clause::Constrains(..) => self.constrains += 1,
@@ -381,8 +437,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// [`UnsolvableOrCancelled::Cancelled`] containing the cancellation value.
     pub fn solve(
         &mut self,
-        problem: Problem<impl IntoIterator<Item = SolvableId>>,
-    ) -> Result<Vec<SolvableId>, UnsolvableOrCancelled> {
+        problem: Problem<D::SolvableId, impl IntoIterator<Item = D::SolvableId>>,
+    ) -> Result<Vec<D::SolvableId>, UnsolvableOrCancelled> {
         // Re-initialize the solver state.
         self.state = SolverState::default();
 
@@ -401,7 +457,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         assert_eq!(root_clause, ClauseId::install_root());
 
         assert!(
-            self.run_sat(SolvableOrRootId::root(), &root_dependencies)?,
+            self.run_sat(SolvableIdOrRoot::root(), &root_dependencies)?,
             "bug: Since root is the first requested solvable, \
                   should have returned Err instead of Ok(false) if root is unsolvable"
         );
@@ -459,7 +515,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// returns [`UnsolvableOrCancelled::Cancelled`] as an `Err`.
     fn run_sat(
         &mut self,
-        root_solvable: SolvableOrRootId,
+        root_solvable: SolvableIdOrRoot<D::SolvableId>,
         root_deps: &Dependencies,
     ) -> Result<bool, UnsolvableOrCancelled> {
         let starting_level = self
@@ -472,7 +528,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
 
         let mut level = starting_level;
         let mut new_solvables: Vec<(VariableId, ClauseId)> = Vec::new();
-        let mut solvable_ids: Vec<SolvableOrRootId> = Vec::new();
+        let mut solvable_ids: Vec<SolvableIdOrRoot<D::SolvableId>> = Vec::new();
 
         loop {
             if level == starting_level {
@@ -553,7 +609,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                         // We need to start over.
                         tracing::debug!(
                             "├─ added clause {clause} introduces a conflict which invalidates the partial solution",
-                            clause = self.state.clauses.kinds[clause_id.to_usize()]
+                            clause = self.state.clauses.kinds[clause_id.to_index()]
                                 .display(&self.state.variable_map, self.provider())
                         );
                         level = starting_level;
@@ -619,7 +675,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     .format_with("\n- ", |(id, derived_from), f| f(&format_args!(
                         "{} (derived from {})",
                         id.display(&self.state.variable_map, self.provider()),
-                        self.state.clauses.kinds[derived_from.to_usize()]
+                        self.state.clauses.kinds[derived_from.to_index()]
                             .display(&self.state.variable_map, self.provider()),
                     )))
                     .to_string()
@@ -632,7 +688,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     .variable_map
                     .origin(*variable)
                     .as_solvable()
-                    .map(SolvableOrRootId::from)
+                    .map(SolvableIdOrRoot::from)
             }));
 
             #[cfg(feature = "diagnostics")]
@@ -650,7 +706,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             for &clause_id in &conflicting_clauses {
                 tracing::debug!(
                     "├─ Added clause {clause} introduces a conflict which invalidates the partial solution",
-                    clause = self.state.clauses.kinds[clause_id.to_usize()]
+                    clause = self.state.clauses.kinds[clause_id.to_index()]
                         .display(&self.state.variable_map, self.provider())
                 );
             }
@@ -671,14 +727,14 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// sets it to `false` and returns `Ok(false)`.
     fn run_sat_process_unsolvable(
         &mut self,
-        solvable_or_root: SolvableOrRootId,
+        solvable_or_root: SolvableIdOrRoot<D::SolvableId>,
         starting_level: u32,
         clause_id: ClauseId,
     ) -> Result<bool, UnsolvableOrCancelled> {
         if starting_level == 0 {
             tracing::trace!(
                 "Unsolvable: {}",
-                self.state.clauses.kinds[clause_id.to_usize()]
+                self.state.clauses.kinds[clause_id.to_index()]
                     .display(&self.state.variable_map, self.provider(),)
             );
             Err(UnsolvableOrCancelled::Unsolvable(
@@ -735,7 +791,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             tracing::debug!(
                 "╒══ Install {} at level {level} (derived from {})",
                 candidate.display(&self.state.variable_map, self.provider()),
-                self.state.clauses.kinds[clause_id.to_usize()]
+                self.state.clauses.kinds[clause_id.to_index()]
                     .display(&self.state.variable_map, self.provider())
             );
 
@@ -888,10 +944,10 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                                     None => {
                                         // We found the first candidate that has not been assigned
                                         // yet.
-                                        let package_activity = self.state.name_activity[self
-                                            .provider()
-                                            .version_set_name(version_set)
-                                            .to_usize()];
+                                        let package_activity = self
+                                            .state
+                                            .name_activity
+                                            .get(self.provider().version_set_name(version_set));
                                         Some((candidate, version_set, 1, package_activity))
                                     }
                                 },
@@ -972,7 +1028,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             tracing::trace!(
                 "deciding to assign {}, ({}, {} activity score, {} possible candidates)",
                 candidate.display(&self.state.variable_map, self.provider()),
-                self.state.clauses.kinds[clause_id.to_usize()]
+                self.state.clauses.kinds[clause_id.to_index()]
                     .display(&self.state.variable_map, self.provider()),
                 package_activity,
                 candidate_count,
@@ -1060,7 +1116,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             );
             tracing::debug!(
                 "││ During unit propagation for clause: {}",
-                self.state.clauses.kinds[conflicting_clause.to_usize()]
+                self.state.clauses.kinds[conflicting_clause.to_index()]
                     .display(&self.state.variable_map, self.provider())
             );
 
@@ -1072,7 +1128,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     .decision_tracker
                     .find_clause_for_assignment(conflicting_solvable)
                     .unwrap()
-                    .to_usize()]
+                    .to_index()]
                 .display(&self.state.variable_map, self.provider()),
             );
         }
@@ -1080,7 +1136,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         if level == 1 {
             for decision in self.state.decision_tracker.stack() {
                 let clause_id = decision.derived_from;
-                let clause = self.state.clauses.kinds[clause_id.to_usize()];
+                let clause = self.state.clauses.kinds[clause_id.to_index()];
                 let level = self.state.decision_tracker.level(decision.variable);
                 let action = if decision.value { "install" } else { "forbid" };
 
@@ -1094,7 +1150,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     decision
                         .variable
                         .display(&self.state.variable_map, self.provider()),
-                    self.state.clauses.kinds[decision.derived_from.to_usize()]
+                    self.state.clauses.kinds[decision.derived_from.to_index()]
                         .display(&self.state.variable_map, self.provider()),
                 );
             }
@@ -1211,7 +1267,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 .cursor(&mut self.state.clauses.watched_literals, watched_literal);
             while let Some(cursor) = next_cursor.take() {
                 let clause_id = cursor.clause_id();
-                let clause = &clause_kinds[clause_id.to_usize()];
+                let clause = &clause_kinds[clause_id.to_index()];
                 let watch_index = cursor.watch_index();
 
                 #[cfg(feature = "diagnostics")]
@@ -1343,7 +1399,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         // Assertions derived from learnt rules
         for learn_clause_idx in 0..self.state.learnt_clause_ids.len() {
             let clause_id = self.state.learnt_clause_ids[learn_clause_idx];
-            let clause = self.state.clauses.kinds[clause_id.to_usize()];
+            let clause = self.state.clauses.kinds[clause_id.to_index()];
             let Clause::Learnt(learnt_index) = clause else {
                 unreachable!();
             };
@@ -1386,13 +1442,13 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// Because learnt clauses are not relevant for the user, they are not added
     /// to the [`Conflict`]. Instead, we report the clauses that caused them.
     fn analyze_unsolvable_clause(
-        clauses: &Vec<Clause>,
+        clauses: &[Clause<D::NameId>],
         learnt_why: &Mapping<LearntClauseId, Vec<ClauseId>>,
         clause_id: ClauseId,
         conflict: &mut Conflict,
         seen: &mut IndexedSet<ClauseId>,
     ) {
-        let clause = &clauses[clause_id.to_usize()];
+        let clause = &clauses[clause_id.to_index()];
         match clause {
             Clause::Learnt(learnt_clause_id) => {
                 if !seen.insert(clause_id) {
@@ -1422,7 +1478,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         tracing::debug!("=== ANALYZE UNSOLVABLE");
 
         let mut involved = HashSet::default();
-        self.state.clauses.kinds[clause_id.to_usize()].visit_literals(
+        self.state.clauses.kinds[clause_id.to_index()].visit_literals(
             &self.state.learnt_clauses,
             &self.state.requirement_to_sorted_candidates,
             &self.state.disjunctions,
@@ -1461,7 +1517,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 &mut seen,
             );
 
-            self.state.clauses.kinds[why.to_usize()].visit_literals(
+            self.state.clauses.kinds[why.to_index()].visit_literals(
                 &self.state.learnt_clauses,
                 &self.state.requirement_to_sorted_candidates,
                 &self.state.disjunctions,
@@ -1509,7 +1565,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         loop {
             learnt_why.push(clause_id);
 
-            clause_kinds[clause_id.to_usize()].visit_literals(
+            clause_kinds[clause_id.to_index()].visit_literals(
                 &self.state.learnt_clauses,
                 &self.state.requirement_to_sorted_candidates,
                 &self.state.disjunctions,
@@ -1579,7 +1635,10 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 .as_solvable(&self.state.variable_map)
                 .map(|s| self.provider().solvable_name(s));
             if let Some(name_id) = name_id {
-                self.state.name_activity[name_id.to_usize()] += self.activity_add;
+                let activity = self.state.name_activity.get(name_id);
+                self.state
+                    .name_activity
+                    .set(name_id, activity + self.activity_add);
             }
         }
 
@@ -1614,22 +1673,22 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// Decays the activity scores of all packages in the solver. This function
     /// is caleld after each conflict.
     fn decay_activity_scores(&mut self) {
-        for activity in &mut self.state.name_activity {
+        self.state.name_activity.for_each_mut(|activity| {
             *activity *= self.activity_decay;
-        }
+        });
     }
 }
 
-impl<L: solvable_id::Layout> SolverState<L> {
+impl<D: DependencyProvider> SolverState<D> {
     /// Allocate a clause and, if it has watched literals, register them in
     /// the [`WatchMap`].
     pub(crate) fn add_clause(
         &mut self,
         watched_literals: Option<WatchedLiterals>,
-        kind: Clause,
+        kind: Clause<D::NameId>,
     ) -> ClauseId {
         let clause_id = self.clauses.alloc(watched_literals, kind);
-        let Some(wl) = self.clauses.watched_literals[clause_id.to_usize()].as_mut() else {
+        let Some(wl) = self.clauses.watched_literals[clause_id.to_index()].as_mut() else {
             return clause_id;
         };
 
@@ -1640,7 +1699,7 @@ impl<L: solvable_id::Layout> SolverState<L> {
 
     /// Returns the solvables that the solver has chosen to include in the
     /// solution so far.
-    fn chosen_solvables(&self) -> impl Iterator<Item = SolvableId> + '_ {
+    fn chosen_solvables(&self) -> impl Iterator<Item = D::SolvableId> + '_ {
         self.decision_tracker.stack().filter_map(|d| {
             if d.value {
                 d.variable.as_solvable(&self.variable_map)

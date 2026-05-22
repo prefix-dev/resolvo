@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
-use crate::internal::arena::ArenaId;
-use crate::internal::id::VariableId;
+use crate::VariableId;
+use crate::id::DenseIndex;
 
 /// Represents a decision (i.e. an assignment to a variable) and the level at
 /// which it was made
@@ -49,7 +49,7 @@ impl DecisionMap {
     }
 
     pub fn reset(&mut self, variable_id: VariableId) {
-        let variable_id = variable_id.to_usize();
+        let variable_id = variable_id.to_index();
         if variable_id < self.map.len() {
             // SAFE: because we check that the solvable id is within bounds
             unsafe { *self.map.get_unchecked_mut(variable_id) = DecisionAndLevel::undecided() };
@@ -57,7 +57,7 @@ impl DecisionMap {
     }
 
     pub fn set(&mut self, variable_id: VariableId, value: bool, level: u32) {
-        let variable_id = variable_id.to_usize();
+        let variable_id = variable_id.to_index();
         if variable_id >= self.map.len() {
             self.map
                 .resize_with(variable_id + 1, DecisionAndLevel::undecided);
@@ -73,12 +73,12 @@ impl DecisionMap {
 
     pub fn level(&self, variable_id: VariableId) -> u32 {
         self.map
-            .get(variable_id.to_usize())
+            .get(variable_id.to_index())
             .map_or(0, |d| d.level())
     }
 
     #[inline(always)]
     pub fn value(&self, variable_id: VariableId) -> Option<bool> {
-        self.map.get(variable_id.to_usize()).and_then(|d| d.value())
+        self.map.get(variable_id.to_index()).and_then(|d| d.value())
     }
 }

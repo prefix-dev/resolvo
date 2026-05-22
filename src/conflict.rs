@@ -12,11 +12,9 @@ use petgraph::{
 };
 
 use crate::{
-    DependencyProvider, Interner, Requirement,
-    internal::{
-        arena::ArenaId,
-        id::{ClauseId, SolvableId, SolvableOrRootId, StringId, VersionSetId},
-    },
+    DenseIndex, DependencyProvider, Interner, Requirement, SolvableId, SolverId, StringId,
+    VersionSetId,
+    internal::{id::ClauseId, solver_id::SolvableIdOrRoot},
     runtime::AsyncRuntime,
     solver::{Solver, clause::Clause, variable_map::VariableOrigin},
 };
@@ -46,19 +44,20 @@ impl Conflict {
     pub fn graph<D: DependencyProvider, RT: AsyncRuntime>(
         &self,
         solver: &Solver<D, RT>,
-    ) -> ConflictGraph {
+    ) -> ConflictGraph<D::SolvableId> {
         let state = &solver.state;
 
-        let mut graph = DiGraph::<ConflictNode, ConflictEdge>::default();
-        let mut nodes: HashMap<SolvableOrRootId, NodeIndex> = HashMap::default();
+        let mut graph =
+            DiGraph::<ConflictNode<D::SolvableId>, ConflictEdge<D::SolvableId>>::default();
+        let mut nodes: HashMap<SolvableIdOrRoot<D::SolvableId>, NodeIndex> = HashMap::default();
         let mut excluded_nodes: HashMap<StringId, NodeIndex> = HashMap::default();
 
-        let root_node = Self::add_node(&mut graph, &mut nodes, SolvableOrRootId::root());
+        let root_node = Self::add_node(&mut graph, &mut nodes, SolvableIdOrRoot::root());
         let unresolved_node = graph.add_node(ConflictNode::UnresolvedDependency);
-        let mut last_node_by_name = HashMap::default();
+        let mut last_node_by_name: HashMap<D::NameId, NodeIndex> = HashMap::default();
 
         for clause_id in &self.clauses {
-            let clause = &state.clauses.kinds[clause_id.to_usize()];
+            let clause = &state.clauses.kinds[clause_id.to_index()];
             match clause {
                 Clause::InstallRoot => (),
                 Clause::Excluded(solvable, reason) => {
@@ -196,14 +195,14 @@ impl Conflict {
         }
     }
 
-    fn add_node(
-        graph: &mut DiGraph<ConflictNode, ConflictEdge>,
-        nodes: &mut HashMap<SolvableOrRootId, NodeIndex>,
-        solvable_id: SolvableOrRootId,
+    fn add_node<S: SolverId>(
+        graph: &mut DiGraph<ConflictNode<S>, ConflictEdge<S>>,
+        nodes: &mut HashMap<SolvableIdOrRoot<S>, NodeIndex>,
+        solvable_id: SolvableIdOrRoot<S>,
     ) -> NodeIndex {
         *nodes
             .entry(solvable_id)
-            .or_insert_with(|| graph.add_node(ConflictNode::Solvable(solvable_id)))
+            .or_insert_with(|| graph.add_node(ConflictNode::from_solvable_or_root(solvable_id)))
     }
 
     /// Display a user-friendly error explaining the conflict
@@ -218,19 +217,29 @@ impl Conflict {
 
 /// A node in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum ConflictNode {
+pub enum ConflictNode<S = SolvableId> {
+    /// Node corresponding to the synthetic solver root
+    Root,
     /// Node corresponding to a solvable
-    Solvable(SolvableOrRootId),
+    Solvable(S),
     /// Node representing a dependency without candidates
     UnresolvedDependency,
     /// Node representing an exclude reason
     Excluded(StringId),
 }
 
-impl ConflictNode {
-    fn solvable_or_root(self) -> SolvableOrRootId {
+impl<S> ConflictNode<S> {
+    fn from_solvable_or_root(solvable_id: SolvableIdOrRoot<S>) -> Self {
+        match solvable_id {
+            SolvableIdOrRoot::Root => Self::Root,
+            SolvableIdOrRoot::Solvable(solvable_id) => Self::Solvable(solvable_id),
+        }
+    }
+
+    fn solvable_or_root(self) -> SolvableIdOrRoot<S> {
         match self {
-            ConflictNode::Solvable(solvable_id) => solvable_id,
+            ConflictNode::Root => SolvableIdOrRoot::root(),
+            ConflictNode::Solvable(solvable_id) => solvable_id.into(),
             ConflictNode::UnresolvedDependency => {
                 panic!("expected solvable node, found unresolved dependency")
             }
@@ -240,22 +249,27 @@ impl ConflictNode {
         }
     }
 
-    fn solvable(self) -> Option<SolvableId> {
-        self.solvable_or_root().solvable()
+    fn solvable(self) -> Option<S> {
+        match self {
+            ConflictNode::Solvable(solvable_id) => Some(solvable_id),
+            ConflictNode::Root | ConflictNode::UnresolvedDependency | ConflictNode::Excluded(_) => {
+                None
+            }
+        }
     }
 }
 
 /// An edge in the graph representation of a [`Conflict`]
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub enum ConflictEdge {
+pub enum ConflictEdge<S = SolvableId> {
     /// The target node is a candidate for the dependency specified by the
     /// [`Requirement`]
     Requires(Requirement),
     /// The target node is involved in a conflict, caused by `ConflictCause`
-    Conflict(ConflictCause),
+    Conflict(ConflictCause<S>),
 }
 
-impl ConflictEdge {
+impl<S> ConflictEdge<S> {
     fn try_requires(self) -> Option<Requirement> {
         match self {
             ConflictEdge::Requires(match_spec_id) => Some(match_spec_id),
@@ -273,9 +287,9 @@ impl ConflictEdge {
 
 /// Conflict causes
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub enum ConflictCause {
+pub enum ConflictCause<S = SolvableId> {
     /// The solvable is locked
-    Locked(SolvableId),
+    Locked(S),
     /// The target node is constrained by the specified version set
     Constrains(VersionSetId),
     /// It is forbidden to install multiple instances of the same dependency
@@ -292,9 +306,9 @@ pub enum ConflictCause {
 /// - They all have the same name
 /// - They all have the same predecessor nodes
 /// - They all have the same successor nodes
-pub struct MergedConflictNode {
+pub struct MergedConflictNode<S = SolvableId> {
     /// The list of solvable ids that have been merged into this node.
-    pub ids: Vec<SolvableId>,
+    pub ids: Vec<S>,
 }
 
 /// Graph representation of [`Conflict`]
@@ -303,22 +317,22 @@ pub struct MergedConflictNode {
 /// solvable's requirements are included in the graph, only those that are
 /// directly or indirectly involved in the conflict.
 #[derive(Clone)]
-pub struct ConflictGraph {
+pub struct ConflictGraph<S = SolvableId> {
     /// The conflict graph as a directed petgraph.
-    pub graph: DiGraph<ConflictNode, ConflictEdge>,
+    pub graph: DiGraph<ConflictNode<S>, ConflictEdge<S>>,
     /// The single source node for root constraints introduced to the solver.
     pub root_node: NodeIndex,
     /// A single sink node that consumes all unresolvable constraints.
     pub unresolved_node: Option<NodeIndex>,
 }
 
-impl ConflictGraph {
+impl<S: SolverId> ConflictGraph<S> {
     /// Writes a graphviz graph that represents this instance to the specified
     /// output.
     pub fn graphviz(
         &self,
         f: &mut impl std::io::Write,
-        interner: &impl Interner,
+        interner: &impl Interner<SolvableId = S>,
         simplify: bool,
     ) -> Result<(), std::io::Error> {
         let graph = &self.graph;
@@ -332,7 +346,9 @@ impl ConflictGraph {
         write!(f, "digraph {{")?;
         for nx in graph.node_indices() {
             let id = match graph.node_weight(nx).as_ref().unwrap() {
-                ConflictNode::Solvable(id) => *id,
+                ConflictNode::Root | ConflictNode::Solvable(_) => {
+                    graph.node_weight(nx).unwrap().solvable_or_root()
+                }
                 _ => continue,
             };
 
@@ -345,7 +361,7 @@ impl ConflictGraph {
                 }
             }
 
-            let mut added_edges = HashSet::new();
+            let mut added_edges = Vec::new();
             for edge in graph.edges_directed(nx, Direction::Outgoing) {
                 let target = *graph.node_weight(edge.target()).unwrap();
 
@@ -371,7 +387,8 @@ impl ConflictGraph {
                 };
 
                 let target = match target {
-                    ConflictNode::Solvable(mut solvable_2) => {
+                    ConflictNode::Root | ConflictNode::Solvable(_) => {
+                        let mut solvable_2 = target.solvable_or_root();
                         // If the target node has been merged, replace it by the first id in the
                         // group
                         if let Some(solvable_id) = solvable_2.solvable() {
@@ -379,9 +396,10 @@ impl ConflictGraph {
                                 solvable_2 = merged.ids[0].into();
 
                                 // Skip the edge if we would be adding a duplicate
-                                if !added_edges.insert(solvable_2) {
+                                if added_edges.contains(&solvable_2) {
                                     continue;
                                 }
+                                added_edges.push(solvable_2);
                             }
                         }
 
@@ -408,22 +426,18 @@ impl ConflictGraph {
     /// candidate
     pub fn simplify(
         &self,
-        interner: &impl Interner,
-    ) -> HashMap<SolvableId, Rc<MergedConflictNode>> {
+        interner: &impl Interner<SolvableId = S>,
+    ) -> HashMap<S, Rc<MergedConflictNode<S>>> {
         let graph = &self.graph;
 
         // Gather information about nodes that can be merged
         let mut maybe_merge = HashMap::default();
         for node_id in graph.node_indices() {
             let candidate = match graph[node_id] {
-                ConflictNode::UnresolvedDependency | ConflictNode::Excluded(_) => continue,
-                ConflictNode::Solvable(solvable_id) => {
-                    if solvable_id.is_root() {
-                        continue;
-                    } else {
-                        solvable_id
-                    }
-                }
+                ConflictNode::Solvable(solvable_id) => solvable_id,
+                ConflictNode::Root
+                | ConflictNode::UnresolvedDependency
+                | ConflictNode::Excluded(_) => continue,
             };
 
             let predecessors: Vec<_> = graph
@@ -437,20 +451,15 @@ impl ConflictGraph {
                 .sorted_unstable()
                 .collect();
 
-            let Some(solvable_id) = candidate.solvable() else {
-                // Root is never merged
-                continue;
-            };
-
             let name = interner
-                .display_name(interner.solvable_name(solvable_id))
+                .display_name(interner.solvable_name(candidate))
                 .to_string();
 
             let entry = maybe_merge
                 .entry((name, predecessors, successors))
                 .or_insert(Vec::new());
 
-            entry.push((node_id, solvable_id));
+            entry.push((node_id, candidate));
         }
 
         let mut merged_candidates = HashMap::default();
@@ -647,15 +656,15 @@ impl Indenter {
 /// A struct implementing [`fmt::Display`] that generates a user-friendly
 /// representation of a conflict graph
 pub struct DisplayUnsat<'i, I: Interner> {
-    graph: ConflictGraph,
-    merged_candidates: HashMap<SolvableId, Rc<MergedConflictNode>>,
+    graph: ConflictGraph<I::SolvableId>,
+    merged_candidates: HashMap<I::SolvableId, Rc<MergedConflictNode<I::SolvableId>>>,
     installable_set: HashSet<NodeIndex>,
     missing_set: HashSet<NodeIndex>,
     interner: &'i I,
 }
 
 impl<'i, I: Interner> DisplayUnsat<'i, I> {
-    pub(crate) fn new(graph: ConflictGraph, interner: &'i I) -> Self {
+    pub(crate) fn new(graph: ConflictGraph<I::SolvableId>, interner: &'i I) -> Self {
         let merged_candidates = graph.simplify(interner);
         let installable_set = graph.get_installable_set();
         let missing_set = graph.get_missing_set();
@@ -672,7 +681,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
     fn fmt_graph(
         &self,
         f: &mut Formatter<'_>,
-        top_level_edges: &[EdgeReference<'_, ConflictEdge>],
+        top_level_edges: &[EdgeReference<'_, ConflictEdge<I::SolvableId>>],
         top_level_indent: bool,
     ) -> fmt::Result {
         pub enum DisplayOp {
@@ -682,7 +691,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
 
         let graph = &self.graph.graph;
         let installable_nodes = &self.installable_set;
-        let mut reported: HashSet<SolvableOrRootId> = HashSet::new();
+        let mut reported = HashSet::new();
 
         // Note: we are only interested in requires edges here
         let indenter = Indenter::new(top_level_indent);
@@ -863,7 +872,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
                         .solvable()
                         .and_then(|solvable_id| self.merged_candidates.get(&solvable_id))
                     {
-                        reported.extend(merged.ids.iter().copied().map(SolvableOrRootId::from));
+                        reported.extend(merged.ids.iter().copied().map(SolvableIdOrRoot::from));
                         self.interner
                             .display_merged_solvables(&merged.ids)
                             .to_string()

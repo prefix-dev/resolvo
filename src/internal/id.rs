@@ -1,130 +1,9 @@
 use std::{
     fmt::{Display, Formatter},
-    num::{NonZero, NonZeroU32},
+    num::NonZeroU32,
 };
 
-use crate::{Interner, internal::arena::ArenaId};
-
-/// The id associated to a package name
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct NameId(pub u32);
-
-impl ArenaId for NameId {
-    fn from_usize(x: usize) -> Self {
-        Self(x as u32)
-    }
-
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-}
-
-/// The id associated with a generic string
-#[repr(transparent)]
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct StringId(pub u32);
-
-impl ArenaId for StringId {
-    fn from_usize(x: usize) -> Self {
-        Self(x as u32)
-    }
-
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-}
-
-/// The id associated with a VersionSet.
-#[repr(transparent)]
-#[derive(Clone, Default, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct VersionSetId(pub u32);
-
-impl ArenaId for VersionSetId {
-    fn from_usize(x: usize) -> Self {
-        Self(x as u32)
-    }
-
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-}
-
-/// The id associated with a Condition.
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct ConditionId(NonZero<u32>);
-
-impl ConditionId {
-    /// Creates a new `ConditionId` from a `u32`
-    pub fn new(id: u32) -> Self {
-        Self::from_usize(id as usize)
-    }
-
-    /// Returns the inner `u32` value of the `ConditionId`.
-    pub fn as_u32(self) -> u32 {
-        self.0.get() - 1
-    }
-}
-
-impl ArenaId for ConditionId {
-    fn from_usize(x: usize) -> Self {
-        let id = (x + 1).try_into().expect("condition id too big");
-        Self(unsafe { NonZero::new_unchecked(id) })
-    }
-
-    fn to_usize(self) -> usize {
-        (self.0.get() - 1) as usize
-    }
-}
-
-/// The id associated with a union (logical OR) of two or more version sets.
-#[repr(transparent)]
-#[derive(Clone, Default, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct VersionSetUnionId(pub u32);
-
-impl ArenaId for VersionSetUnionId {
-    fn from_usize(x: usize) -> Self {
-        Self(x as u32)
-    }
-
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-}
-
-/// The id associated to a solvable
-#[repr(transparent)]
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct SolvableId(pub u32);
-
-impl ArenaId for SolvableId {
-    fn from_usize(x: usize) -> Self {
-        Self(x as u32)
-    }
-
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl From<SolvableId> for u32 {
-    fn from(value: SolvableId) -> Self {
-        value.0
-    }
-}
+use crate::{DenseIndex, Interner, internal::solver_id::SolvableIdOrRoot};
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash)]
@@ -138,13 +17,13 @@ impl ClauseId {
     }
 }
 
-impl ArenaId for ClauseId {
-    fn from_usize(x: usize) -> Self {
+impl DenseIndex for ClauseId {
+    fn from_index(x: usize) -> Self {
         // SAFETY: Safe because we always add 1 to the index
         Self(unsafe { NonZeroU32::new_unchecked((x + 1).try_into().expect("clause id too big")) })
     }
 
-    fn to_usize(self) -> usize {
+    fn to_index(self) -> usize {
         (self.0.get() - 1) as usize
     }
 }
@@ -152,12 +31,12 @@ impl ArenaId for ClauseId {
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct LearntClauseId(u32);
 
-impl ArenaId for LearntClauseId {
-    fn from_usize(x: usize) -> Self {
+impl DenseIndex for LearntClauseId {
+    fn from_index(x: usize) -> Self {
         Self(x as u32)
     }
 
-    fn to_usize(self) -> usize {
+    fn to_index(self) -> usize {
         self.0 as usize
     }
 }
@@ -167,12 +46,12 @@ impl ArenaId for LearntClauseId {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CandidatesId(u32);
 
-impl ArenaId for CandidatesId {
-    fn from_usize(x: usize) -> Self {
+impl DenseIndex for CandidatesId {
+    fn from_index(x: usize) -> Self {
         Self(x as u32)
     }
 
-    fn to_usize(self) -> usize {
+    fn to_index(self) -> usize {
         self.0 as usize
     }
 }
@@ -182,136 +61,37 @@ impl ArenaId for CandidatesId {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DependenciesId(NonZeroU32);
 
-impl ArenaId for DependenciesId {
-    fn from_usize(x: usize) -> Self {
+impl DenseIndex for DependenciesId {
+    fn from_index(x: usize) -> Self {
         let raw: u32 = (x + 1).try_into().expect("dependencies id too big");
         // SAFETY: `raw` is `x + 1`, hence at least 1, hence non-zero.
         Self(unsafe { NonZeroU32::new_unchecked(raw) })
     }
 
-    fn to_usize(self) -> usize {
+    fn to_index(self) -> usize {
         (self.0.get() - 1) as usize
     }
 }
 
-/// A unique identifier for a variable in the solver.
-///
-/// Uses a non-zero representation so that `Option<VariableId>` is the same
-/// size as `VariableId`.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct VariableId(NonZeroU32);
-
-impl VariableId {
-    /// Returns the variable id representing the root of the decision tree.
-    pub fn root() -> Self {
-        // SAFETY: 1 is non-zero.
-        Self(unsafe { NonZeroU32::new_unchecked(1) })
-    }
-
-    /// Returns `true` if this variable represents the root.
-    pub fn is_root(self) -> bool {
-        self.0.get() == 1
-    }
-}
-
-impl ArenaId for VariableId {
-    #[inline]
-    fn from_usize(x: usize) -> Self {
-        let raw: u32 = (x + 1).try_into().expect("variable id too big");
-        // SAFETY: `raw` is `x + 1`, hence at least 1, hence non-zero.
-        Self(unsafe { NonZeroU32::new_unchecked(raw) })
-    }
-
-    #[inline]
-    fn to_usize(self) -> usize {
-        (self.0.get() - 1) as usize
-    }
-}
-
-impl SolvableId {
-    pub(crate) fn display<I: Interner>(self, interner: &I) -> impl Display + '_ {
-        DisplaySolvableId {
-            interner,
-            solvable_id: self,
-        }
-    }
-}
-
-pub(crate) struct DisplaySolvableId<'i, I: Interner> {
-    interner: &'i I,
-    solvable_id: SolvableId,
-}
-
-impl<I: Interner> Display for DisplaySolvableId<'_, I> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.interner.display_solvable(self.solvable_id))
-    }
-}
-
-/// Represents either a solvable id or the root id.
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct SolvableOrRootId(u32);
-
-impl SolvableOrRootId {
-    /// Constructs a new instance that represents the root
-    pub const fn root() -> Self {
-        Self(0)
-    }
-
-    /// Returns true if this instance represents the root node.
-    pub fn is_root(self) -> bool {
-        self.0 == 0
-    }
-
-    /// Returns `Some(solvable)` if this instance represents a solvable.
-    pub fn solvable(self) -> Option<SolvableId> {
-        if self.0 == 0 {
-            None
-        } else {
-            Some(SolvableId(self.0 - 1))
-        }
-    }
-
+impl<S> SolvableIdOrRoot<S> {
     /// Returns an object that can be used to format the solvable or root id.
-    pub fn display<I: Interner>(self, interner: &I) -> impl Display + '_ {
-        DisplaySolvableOrRootId {
+    pub fn display<I: Interner<SolvableId = S>>(self, interner: &I) -> impl Display + '_ {
+        DisplaySolvableIdOrRoot {
             interner,
             solvable_id: self,
         }
     }
 }
 
-impl From<SolvableId> for SolvableOrRootId {
-    fn from(value: SolvableId) -> Self {
-        Self(
-            (value.to_usize() + 1)
-                .try_into()
-                .expect("solvable id too big"),
-        )
-    }
-}
-
-impl ArenaId for SolvableOrRootId {
-    fn from_usize(x: usize) -> Self {
-        Self(x.try_into().expect("solvable-or-root id too big"))
-    }
-
-    fn to_usize(self) -> usize {
-        self.0 as usize
-    }
-}
-
-pub(crate) struct DisplaySolvableOrRootId<'i, I: Interner> {
+pub(crate) struct DisplaySolvableIdOrRoot<'i, I: Interner> {
     interner: &'i I,
-    solvable_id: SolvableOrRootId,
+    solvable_id: SolvableIdOrRoot<I::SolvableId>,
 }
 
-impl<I: Interner> Display for DisplaySolvableOrRootId<'_, I> {
+impl<I: Interner> Display for DisplaySolvableIdOrRoot<'_, I> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.solvable_id.solvable() {
-            Some(solvable_id) => write!(f, "{}", solvable_id.display(self.interner)),
+            Some(solvable_id) => write!(f, "{}", self.interner.display_solvable(solvable_id)),
             None => write!(f, "root"),
         }
     }
@@ -320,6 +100,7 @@ impl<I: Interner> Display for DisplaySolvableOrRootId<'_, I> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::VariableId;
 
     #[test]
     fn test_clause_id_size() {
@@ -351,9 +132,9 @@ mod tests {
     #[test]
     fn test_variable_id_root_roundtrip() {
         assert!(VariableId::root().is_root());
-        assert_eq!(VariableId::root().to_usize(), 0);
-        assert_eq!(VariableId::from_usize(0), VariableId::root());
-        assert!(!VariableId::from_usize(1).is_root());
-        assert_eq!(VariableId::from_usize(7).to_usize(), 7);
+        assert_eq!(VariableId::root().to_index(), 0);
+        assert_eq!(VariableId::from_index(0), VariableId::root());
+        assert!(!VariableId::from_index(1).is_root());
+        assert_eq!(VariableId::from_index(7).to_index(), 7);
     }
 }

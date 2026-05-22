@@ -1,22 +1,22 @@
 use std::{any::Any, collections::VecDeque, future::ready};
 
+use super::{SolverState, clause::WatchedLiterals, conditions};
+use crate::{
+    Candidates, ConditionId, ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider,
+    SolverCache, StringId, VariableId, VersionSetId,
+    internal::{id::ClauseId, solver_id::SolvableIdOrRoot},
+    solver::{conditions::Disjunction, decision::Decision},
+    solver_id::{IdMap, IdSet},
+    utils::IndexedSet,
+};
 use futures::{
     FutureExt, StreamExt, TryFutureExt, future::LocalBoxFuture, stream::FuturesUnordered,
 };
 use indexmap::IndexMap;
 
-use super::{SolverState, clause::WatchedLiterals, conditions};
-use crate::{
-    Candidates, ConditionId, ConditionalRequirement, Dependencies, DependencyProvider, NameId,
-    SolvableId, SolverCache, StringId, VersionSetId,
-    internal::{
-        arena::ArenaId,
-        id::{ClauseId, SolvableOrRootId, VariableId},
-        indexed_set::IndexedSet,
-    },
-    solvable_id::SolvableSet,
-    solver::{conditions::Disjunction, decision::Decision},
-};
+type PendingTask<'cache, D> = LocalBoxFuture<'cache, Result<TaskResult<'cache, D>, Box<dyn Any>>>;
+
+type RequirementCondition<'a, S> = Option<(ConditionId, Vec<Vec<DisjunctionComplement<'a, S>>>)>;
 
 /// An object that is responsible for encoding information from the dependency
 /// provider into rules and variables that are used by the solver.
@@ -30,7 +30,7 @@ use crate::{
 /// The encoder itself is completely single threaded (and not `Send`) but the
 /// dependency provider is free to spawn tasks on other threads.
 pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
-    state: &'a mut SolverState<D::SolvableIdLayout>,
+    state: &'a mut SolverState<D>,
     cache: &'cache SolverCache<D>,
     level: u32,
 
@@ -38,15 +38,14 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     root_dependencies: &'cache Dependencies,
 
     /// The set of futures that are pending to be resolved.
-    pending_futures:
-        FuturesUnordered<LocalBoxFuture<'cache, Result<TaskResult<'cache>, Box<dyn Any>>>>,
+    pending_futures: FuturesUnordered<PendingTask<'cache, D>>,
 
     /// A list of clauses that were introduced that are conflicting with the
     /// current state.
     conflicting_clauses: Vec<ClauseId>,
 
     /// Stores for which packages and solvables we want to add forbid clauses.
-    pending_forbid_clauses: IndexMap<NameId, Vec<VariableId>, ahash::RandomState>,
+    pending_forbid_clauses: IndexMap<D::NameId, Vec<VariableId>, ahash::RandomState>,
 
     /// Tracks which variables have already been added to
     /// `pending_forbid_clauses` to avoid accumulating millions of duplicate
@@ -55,57 +54,57 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     forbid_seen: IndexedSet<VariableId>,
 
     /// A set of packages that should have an at-least-once tracker.
-    new_at_least_one_packages: IndexMap<NameId, VariableId, ahash::RandomState>,
+    new_at_least_one_packages: IndexMap<D::NameId, VariableId, ahash::RandomState>,
 
     /// Results from futures that completed immediately during
     /// `try_immediate_or_queue`.
-    pending_results: VecDeque<Result<TaskResult<'cache>, Box<dyn Any>>>,
+    pending_results: VecDeque<Result<TaskResult<'cache, D>, Box<dyn Any>>>,
 }
 
 /// The result of a future that was queued for processing.
-enum TaskResult<'a> {
-    Dependencies(DependenciesAvailable<'a>),
-    Candidates(CandidatesAvailable<'a>),
-    RequirementCandidates(RequirementCandidatesAvailable<'a>),
-    ConstraintCandidates(ConstraintCandidatesAvailable<'a>),
+enum TaskResult<'a, D: DependencyProvider> {
+    Dependencies(DependenciesAvailable<'a, D::SolvableId>),
+    Candidates(CandidatesAvailable<'a, D>),
+    RequirementCandidates(RequirementCandidatesAvailable<'a, D>),
+    ConstraintCandidates(ConstraintCandidatesAvailable<'a, D::SolvableId>),
 }
 
 /// Result of requesting the dependencies for a certain solvable.
-struct DependenciesAvailable<'a> {
-    solvable_id: SolvableOrRootId,
+struct DependenciesAvailable<'a, S> {
+    solvable_id: SolvableIdOrRoot<S>,
     dependencies: &'a Dependencies,
 }
 
 /// Results of requesting the candidates for a certain package.
-struct CandidatesAvailable<'a> {
-    name_id: NameId,
-    package_candidates: &'a Candidates,
+struct CandidatesAvailable<'a, D: DependencyProvider> {
+    name_id: D::NameId,
+    package_candidates: &'a Candidates<D::SolvableId>,
 }
 
 /// Result of querying candidates for a particular requirement.
-struct RequirementCandidatesAvailable<'a> {
-    solvable_id: SolvableOrRootId,
+struct RequirementCandidatesAvailable<'a, D: DependencyProvider> {
+    solvable_id: SolvableIdOrRoot<D::SolvableId>,
     requirement: ConditionalRequirement,
-    candidates: Vec<&'a [SolvableId]>,
-    condition: Option<(ConditionId, Vec<Vec<DisjunctionComplement<'a>>>)>,
+    candidates: Vec<&'a [D::SolvableId]>,
+    condition: RequirementCondition<'a, D::SolvableId>,
 }
 
 /// The complement of a solvables that match aVersionSet or an empty set.
-enum DisjunctionComplement<'a> {
-    Solvables(VersionSetId, &'a [SolvableId]),
+enum DisjunctionComplement<'a, S> {
+    Solvables(VersionSetId, &'a [S]),
     Empty(VersionSetId),
 }
 
 /// Result of querying candidates for a particular constraint.
-struct ConstraintCandidatesAvailable<'a> {
-    solvable_id: SolvableOrRootId,
+struct ConstraintCandidatesAvailable<'a, S> {
+    solvable_id: SolvableIdOrRoot<S>,
     constraint: VersionSetId,
-    candidates: &'a [SolvableId],
+    candidates: &'a [S],
 }
 
 impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     pub fn new(
-        state: &'a mut SolverState<D::SolvableIdLayout>,
+        state: &'a mut SolverState<D>,
         cache: &'cache SolverCache<D>,
         root_dependencies: &'cache Dependencies,
         level: u32,
@@ -134,7 +133,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// and waker bookkeeping.
     fn queue_future<F>(&mut self, future: F)
     where
-        F: std::future::Future<Output = Result<TaskResult<'cache>, Box<dyn Any>>> + 'cache,
+        F: std::future::Future<Output = Result<TaskResult<'cache, D>, Box<dyn Any>>> + 'cache,
     {
         let mut boxed = future.boxed_local();
         match boxed.as_mut().now_or_never() {
@@ -150,7 +149,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// Encode rules and variables for the given solvables.
     pub async fn encode(
         mut self,
-        solvable_ids: impl IntoIterator<Item = SolvableOrRootId>,
+        solvable_ids: impl IntoIterator<Item = SolvableIdOrRoot<D::SolvableId>>,
     ) -> Result<Vec<ClauseId>, Box<dyn Any>> {
         // Queue the initial solvables for processing.
         for solvable_id in solvable_ids {
@@ -180,7 +179,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     }
 
     /// Called when the result of a future is available.
-    fn on_task_result(&mut self, result: TaskResult<'cache>) {
+    fn on_task_result(&mut self, result: TaskResult<'cache, D>) {
         match result {
             TaskResult::Dependencies(dependencies) => self.on_dependencies_available(dependencies),
             TaskResult::Candidates(candidates) => self.on_candidates_available(candidates),
@@ -205,7 +204,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         DependenciesAvailable {
             solvable_id,
             dependencies,
-        }: DependenciesAvailable<'cache>,
+        }: DependenciesAvailable<'cache, D::SolvableId>,
     ) {
         tracing::trace!(
             "dependencies available for {}",
@@ -252,17 +251,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         CandidatesAvailable {
             name_id,
             package_candidates,
-        }: CandidatesAvailable<'cache>,
+        }: CandidatesAvailable<'cache, D>,
     ) {
         tracing::trace!(
             "Package candidates available for {}",
             self.cache.provider().display_name(name_id)
         );
-
-        // Resize the activity vector if needed
-        if self.state.name_activity.len() <= name_id.to_usize() {
-            self.state.name_activity.resize(name_id.to_usize() + 1, 0.0);
-        }
 
         // If there is a locked solvable, forbid all other candidates
         if let Some(locked_solvable_id) = package_candidates.locked {
@@ -287,7 +281,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             requirement,
             candidates,
             condition,
-        }: RequirementCandidatesAvailable<'cache>,
+        }: RequirementCandidatesAvailable<'cache, D>,
     ) {
         tracing::trace!(
             "Sorted candidates available for {}",
@@ -332,7 +326,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             if self
                 .state
                 .clauses_added_for_solvable
-                .contains(SolvableOrRootId::from(candidate))
+                .contains(SolvableIdOrRoot::from(candidate))
             {
                 continue;
             }
@@ -361,23 +355,20 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                         }
                         DisjunctionComplement::Empty(version_set) => {
                             let name_id = self.cache.provider().version_set_name(version_set);
-                            let at_least_one_of_var = match self
-                                .state
-                                .at_least_one_tracker
-                                .get(&name_id)
-                                .copied()
-                                .or_else(|| self.new_at_least_one_packages.get(&name_id).copied())
-                            {
-                                Some(variable) => variable,
-                                None => {
-                                    let variable = self
-                                        .state
-                                        .variable_map
-                                        .alloc_at_least_one_variable(name_id);
-                                    self.new_at_least_one_packages.insert(name_id, variable);
-                                    variable
-                                }
-                            };
+                            let at_least_one_of_var =
+                                match self.state.at_least_one_tracker.get(name_id).or_else(|| {
+                                    self.new_at_least_one_packages.get(&name_id).copied()
+                                }) {
+                                    Some(variable) => variable,
+                                    None => {
+                                        let variable = self
+                                            .state
+                                            .variable_map
+                                            .alloc_at_least_one_variable(name_id);
+                                        self.new_at_least_one_packages.insert(name_id, variable);
+                                        variable
+                                    }
+                                };
                             disjunction_literals.push(at_least_one_of_var.negative());
                         }
                     }
@@ -434,7 +425,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             solvable_id,
             constraint,
             candidates,
-        }: ConstraintCandidatesAvailable<'cache>,
+        }: ConstraintCandidatesAvailable<'cache, D::SolvableId>,
     ) {
         tracing::trace!(
             "non matching candidates available for {} {}",
@@ -467,8 +458,8 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// installed.
     fn add_locked_package_clauses(
         &mut self,
-        locked_solvable_id: SolvableId,
-        all_candidate_ids: &[SolvableId],
+        locked_solvable_id: D::SolvableId,
+        all_candidate_ids: &[D::SolvableId],
     ) {
         let locked_solvable_var = self.state.variable_map.intern_solvable(locked_solvable_id);
         for &other_candidate in all_candidate_ids {
@@ -488,7 +479,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// Adds a clause to exclude a particular solvable
     fn add_exclusion_clause(
         &mut self,
-        solvable_id: SolvableOrRootId,
+        solvable_id: SolvableIdOrRoot<D::SolvableId>,
         reason: StringId,
     ) -> VariableId {
         let variable = self.state.variable_map.intern_solvable_or_root(solvable_id);
@@ -515,7 +506,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// async fashion and does not process the result itself. Instead, the
     /// future is queued for processing. When the future returns its result is
     /// processed by the [`Self::on_dependencies_available`] function.
-    fn queue_solvable(&mut self, solvable_id: SolvableOrRootId) {
+    fn queue_solvable(&mut self, solvable_id: SolvableIdOrRoot<D::SolvableId>) {
         // Early out if the solvable has already been processed
         if !self.state.clauses_added_for_solvable.insert(solvable_id) {
             return;
@@ -536,7 +527,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     }
 
     /// Enqueues retrieving all candidates for a particular package name.
-    fn queue_package(&mut self, name_id: NameId) {
+    fn queue_package(&mut self, name_id: D::NameId) {
         // Early out if the package has already been processed
         if !self.state.clauses_added_for_package.insert(name_id) {
             return;
@@ -556,7 +547,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// candidates are already filtered and sorted.
     fn queue_conditional_requirement(
         &mut self,
-        solvable_id: SolvableOrRootId,
+        solvable_id: SolvableIdOrRoot<D::SolvableId>,
         requirement: ConditionalRequirement,
     ) {
         let cache = self.cache;
@@ -611,7 +602,11 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
     /// Enqueues retrieving the candidates for a particular constraint. These
     /// are the candidates that do *not* match the version set.
-    fn queue_constraint(&mut self, solvable_id: SolvableOrRootId, constraint: VersionSetId) {
+    fn queue_constraint(
+        &mut self,
+        solvable_id: SolvableIdOrRoot<D::SolvableId>,
+        constraint: VersionSetId,
+    ) {
         let cache = self.cache;
         self.queue_future(async move {
             let non_matching_candidates = cache
@@ -630,7 +625,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// Record `variable` as a candidate for a forbid-multiple clause under
     /// `name_id`. Returns silently if the variable has already been registered;
     /// see [`Self::forbid_seen`] for why globally-deduplicating is safe.
-    fn register_forbid_target(&mut self, name_id: NameId, variable: VariableId) {
+    fn register_forbid_target(&mut self, name_id: D::NameId, variable: VariableId) {
         if self.forbid_seen.insert(variable) {
             self.pending_forbid_clauses
                 .entry(name_id)
@@ -658,7 +653,11 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             // Add forbid constraints for this solvable on all other
             // solvables that have been visited already for the same
             // version set name.
-            let other_solvables = self.state.at_most_one_trackers.entry(name_id).or_default();
+            let mut other_solvables = self
+                .state
+                .at_most_one_trackers
+                .remove(&name_id)
+                .unwrap_or_default();
             let variable_is_new = other_solvables.add(
                 candidate_var,
                 |a, b, positive| {
@@ -671,7 +670,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     // call `self.state.add_clause(..)` here.
                     let clause_id = self.state.clauses.alloc(watched_literals, kind);
                     if let Some(wl) =
-                        self.state.clauses.watched_literals[clause_id.to_usize()].as_mut()
+                        self.state.clauses.watched_literals[clause_id.to_index()].as_mut()
                     {
                         self.state.watches.start_watching(wl, clause_id);
                     }
@@ -708,10 +707,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                         .alloc_forbid_multiple_variable(name_id)
                 },
             );
+            self.state
+                .at_most_one_trackers
+                .insert(name_id, other_solvables);
 
             if variable_is_new {
-                if let Some(&at_least_one_variable) = self.state.at_least_one_tracker.get(&name_id)
-                {
+                if let Some(at_least_one_variable) = self.state.at_least_one_tracker.get(name_id) {
                     let (watched_literals, kind) =
                         WatchedLiterals::any_of(at_least_one_variable, candidate_var);
                     self.state.add_clause(watched_literals, kind);
@@ -769,7 +770,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             // Record that we have a variable for this package.
             self.state
                 .at_least_one_tracker
-                .insert(name_id, at_least_one_variable);
+                .set(name_id, Some(at_least_one_variable));
         }
     }
 }

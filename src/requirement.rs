@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use itertools::Itertools;
 
-use crate::internal::id::ConditionId;
+use crate::ConditionId;
 use crate::{ConditionalRequirement, Interner, VersionSetId, VersionSetUnionId};
 
 /// Specifies the dependency of a solvable on a set of version sets.

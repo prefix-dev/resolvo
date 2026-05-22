@@ -95,8 +95,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             clauses.len(),
             human_bytes::human_bytes(
                 (clauses.len()
-                    * (std::mem::size_of::<Clause>() + std::mem::size_of::<WatchedLiterals>()))
-                    as f64
+                    * (std::mem::size_of::<Clause<D::NameId>>()
+                        + std::mem::size_of::<WatchedLiterals>())) as f64
             )
         )
         .unwrap();
