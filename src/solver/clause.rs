@@ -113,6 +113,7 @@ impl<N> Clause<N> {
     /// change. The propagation loop relies on this to skip the
     /// `next_unwatched_literal` scan, which can never succeed for such
     /// clauses.
+    #[inline]
     pub fn is_binary(&self) -> bool {
         matches!(
             self,
@@ -554,6 +555,7 @@ pub(crate) struct Literal(NonZeroU32);
 impl Literal {
     /// Constructs a new [`Literal`] from a [`VariableId`] and a boolean
     /// indicating whether the literal should be negated.
+    #[inline]
     pub fn new(variable: VariableId, negate: bool) -> Self {
         let variable_idx = variable.to_index();
         let encoded_literal = variable_idx << 1 | negate as usize;
@@ -562,24 +564,28 @@ impl Literal {
 }
 
 impl DenseIndex for Literal {
+    #[inline]
     fn from_index(x: usize) -> Self {
         let idx: u32 = (x + 1).try_into().expect("watched literal id too big");
         // SAFETY: This is safe because we are adding 1 to the index
         unsafe { Literal(NonZeroU32::new_unchecked(idx)) }
     }
 
+    #[inline]
     fn to_index(self) -> usize {
         self.0.get() as usize - 1
     }
 }
 
 impl Literal {
+    #[inline]
     pub fn negate(&self) -> bool {
         (self.0.get() & 1) == 0
     }
 
     /// Returns the value that would make the literal evaluate to true if
     /// assigned to the literal's solvable
+    #[inline]
     pub(crate) fn satisfying_value(self) -> bool {
         !self.negate()
     }
@@ -604,12 +610,14 @@ impl Literal {
 impl VariableId {
     /// Constructs a [`Literal`] that indicates this solvable should be assigned
     /// a positive value.
+    #[inline]
     pub(crate) fn positive(self) -> Literal {
         Literal::new(self, false)
     }
 
     /// Constructs a [`Literal`] that indicates this solvable should be assigned
     /// a negative value.
+    #[inline]
     pub(crate) fn negative(self) -> Literal {
         Literal::new(self, true)
     }

@@ -23,6 +23,7 @@ impl<Id> Default for IndexedSet<Id> {
 
 impl<Id: DenseIndex> IndexedSet<Id> {
     /// Inserts `id`. Returns `true` if `id` was not already present.
+    #[inline]
     pub fn insert(&mut self, id: Id) -> bool {
         let idx = id.to_index();
         if idx >= self.bits.len() {
@@ -33,6 +34,7 @@ impl<Id: DenseIndex> IndexedSet<Id> {
     }
 
     /// Returns `true` if `id` is present.
+    #[inline]
     pub fn contains(&self, id: Id) -> bool {
         self.bits.get(id.to_index()).is_some_and(|b| *b)
     }

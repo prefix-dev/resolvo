@@ -40,6 +40,7 @@ impl WatchMap {
     /// Returns a [`WatchMapCursor`] that can be used to navigate and manipulate
     /// the linked list of the clauses that are watching the specified
     /// literal.
+    #[inline]
     pub fn cursor<'a>(
         &'a mut self,
         watches: &'a mut [Option<WatchedLiterals>],
@@ -109,6 +110,7 @@ pub struct WatchMapCursor<'a> {
 impl WatchMapCursor<'_> {
     /// Skip to the next node in the linked list. Returns `None` if there is no
     /// next node.
+    #[inline]
     pub fn next(mut self) -> Option<Self> {
         let next = self.next_node()?;
 
@@ -119,6 +121,7 @@ impl WatchMapCursor<'_> {
     }
 
     /// Returns the next node in the linked list or `None` if there is no next.
+    #[inline]
     fn next_node(&self) -> Option<WatchNode> {
         let current_watch = self.watched_literals();
         let next_clause_id = current_watch.next_watches[self.current.watch_index]?;
@@ -142,11 +145,13 @@ impl WatchMapCursor<'_> {
     }
 
     /// The current clause that is being navigated.
+    #[inline]
     pub fn clause_id(&self) -> ClauseId {
         self.current.clause_id
     }
 
     /// Returns the watches of the current clause.
+    #[inline]
     pub fn watched_literals(&self) -> &WatchedLiterals {
         // SAFETY: Within the cursor, the current clause is always watching literals.
         unsafe {
@@ -158,6 +163,7 @@ impl WatchMapCursor<'_> {
     }
 
     /// Returns the index of the current watch in the current clause.
+    #[inline]
     pub fn watch_index(&self) -> usize {
         self.current.watch_index
     }
@@ -167,6 +173,7 @@ impl WatchMapCursor<'_> {
     ///
     /// Returns a cursor that points to the next node in the linked list or
     /// `None` if there is no next.
+    #[inline]
     pub fn update(mut self, new_watch: Literal) -> Option<Self> {
         debug_assert_ne!(
             new_watch, self.literal,

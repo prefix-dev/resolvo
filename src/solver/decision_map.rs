@@ -48,6 +48,7 @@ impl DecisionMap {
         self.map.len()
     }
 
+    #[inline]
     pub fn reset(&mut self, variable_id: VariableId) {
         let variable_id = variable_id.to_index();
         if variable_id < self.map.len() {
@@ -56,6 +57,7 @@ impl DecisionMap {
         }
     }
 
+    #[inline]
     pub fn set(&mut self, variable_id: VariableId, value: bool, level: u32) {
         let variable_id = variable_id.to_index();
         if variable_id >= self.map.len() {
@@ -71,6 +73,7 @@ impl DecisionMap {
         };
     }
 
+    #[inline]
     pub fn level(&self, variable_id: VariableId) -> u32 {
         self.map
             .get(variable_id.to_index())

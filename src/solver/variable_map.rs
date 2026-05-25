@@ -112,6 +112,7 @@ impl<N: SolverId, S: SolverId> VariableMap<N, S> {
 
     /// Returns the origin of a variable. The origin describes the semantics of
     /// a variable.
+    #[inline]
     pub fn origin(&self, variable_id: VariableId) -> VariableOrigin<N, S> {
         self.origins[variable_id.to_index()]
     }
