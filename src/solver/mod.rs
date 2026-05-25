@@ -1279,6 +1279,10 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 // If the other literal the current clause is watching is already true, we can
                 // skip this clause. Its is already satisfied.
                 let watched_literals = cursor.watched_literals();
+                // Prefetch the next clause's `WatchedLiterals` to overlap the
+                // pointer-chasing latency with this iteration's work. The
+                // inner BCP loop is memory-bound on this linked-list walk.
+                cursor.prefetch_next();
                 let other_watched_literal =
                     watched_literals.watched_literals[1 - cursor.watch_index()];
                 if other_watched_literal.eval(self.state.decision_tracker.map()) == Some(true) {

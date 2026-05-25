@@ -162,6 +162,37 @@ impl WatchMapCursor<'_> {
         }
     }
 
+    /// Issues a software prefetch hint for the next clause's `WatchedLiterals`,
+    /// if there is one. This is a pure hint to the CPU's prefetcher with no
+    /// observable side-effects. Used to overlap memory latency on the
+    /// linked-list traversal with the current iteration's compute.
+    #[inline]
+    pub fn prefetch_next(&self) {
+        let current_watch = self.watched_literals();
+        if let Some(next_id) = current_watch.next_watches[self.current.watch_index] {
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    self.watches.as_ptr().add(next_id.to_index()) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                );
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                // Best-effort prefetch on aarch64. Stable Rust doesn't expose a
+                // user-mode prefetch intrinsic, so we just read a single byte
+                // which the CPU's prefetcher may pick up as a hint.
+                let _ = unsafe {
+                    self.watches
+                        .as_ptr()
+                        .add(next_id.to_index())
+                        .cast::<u8>()
+                        .read_volatile()
+                };
+            }
+        }
+    }
+
     /// Returns the index of the current watch in the current clause.
     #[inline]
     pub fn watch_index(&self) -> usize {
