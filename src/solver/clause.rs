@@ -5,8 +5,7 @@ use std::{
     ops::ControlFlow,
 };
 
-use elsa::FrozenMap;
-
+use crate::requirement::RequirementMap;
 use crate::solver::conditions::Disjunction;
 use crate::{
     DenseIndex, Interner, Requirement, SolverId, StringId, VariableId, VersionSetId,
@@ -278,11 +277,7 @@ impl<N: SolverId> Clause<N> {
     pub fn try_fold_literals<B, C, F>(
         &self,
         learnt_clauses: &Arena<LearntClauseId, Vec<Literal>>,
-        requirements_to_sorted_candidates: &FrozenMap<
-            Requirement,
-            Vec<Vec<VariableId>>,
-            ahash::RandomState,
-        >,
+        requirements_to_sorted_candidates: &RequirementMap<Vec<Vec<VariableId>>>,
         disjunction_to_candidates: &Arena<DisjunctionId, Disjunction>,
         init: C,
         mut visit: F,
@@ -306,7 +301,7 @@ impl<N: SolverId> Clause<N> {
                             .copied(),
                     )
                     .chain(
-                        requirements_to_sorted_candidates[&match_spec_id]
+                        requirements_to_sorted_candidates[match_spec_id]
                             .iter()
                             .flatten()
                             .map(|&s| s.positive()),
@@ -334,11 +329,7 @@ impl<N: SolverId> Clause<N> {
     pub fn visit_literals(
         &self,
         learnt_clauses: &Arena<LearntClauseId, Vec<Literal>>,
-        requirements_to_sorted_candidates: &FrozenMap<
-            Requirement,
-            Vec<Vec<VariableId>>,
-            ahash::RandomState,
-        >,
+        requirements_to_sorted_candidates: &RequirementMap<Vec<Vec<VariableId>>>,
         disjunction_to_candidates: &Arena<DisjunctionId, Disjunction>,
         mut visit: impl FnMut(Literal),
     ) {
@@ -500,11 +491,7 @@ impl WatchedLiterals {
         &self,
         clause: &Clause<N>,
         learnt_clauses: &Arena<LearntClauseId, Vec<Literal>>,
-        requirement_to_sorted_candidates: &FrozenMap<
-            Requirement,
-            Vec<Vec<VariableId>>,
-            ahash::RandomState,
-        >,
+        requirement_to_sorted_candidates: &RequirementMap<Vec<Vec<VariableId>>>,
         disjunction_to_candidates: &Arena<DisjunctionId, Disjunction>,
         decision_map: &DecisionMap,
         for_watch_index: usize,

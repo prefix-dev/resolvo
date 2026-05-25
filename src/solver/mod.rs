@@ -6,7 +6,6 @@ use clause::{Clause, Literal, WatchedLiterals};
 use conditions::{Disjunction, DisjunctionId};
 use decision::Decision;
 use decision_tracker::DecisionTracker;
-use elsa::FrozenMap;
 use encoding::Encoder;
 use indexmap::IndexMap;
 use itertools::Itertools;
@@ -23,6 +22,7 @@ use crate::{
         id::{ClauseId, LearntClauseId},
         solver_id::{SolvableIdOrRoot, WithRootSet},
     },
+    requirement::RequirementMap,
     runtime::{AsyncRuntime, NowOrNeverRuntime},
     solver::binary_encoding::AtMostOnceTracker,
     solver_id::{IdMap, IdSet, SolverId},
@@ -205,8 +205,7 @@ pub(crate) struct SolverState<D: DependencyProvider> {
 
     /// A mapping from requirements to the variables that represent the
     /// candidates.
-    requirement_to_sorted_candidates:
-        FrozenMap<Requirement, RequirementCandidateVariables, ahash::RandomState>,
+    requirement_to_sorted_candidates: RequirementMap<RequirementCandidateVariables>,
 
     pub(crate) variable_map: VariableMap<D::NameId, D::SolvableId>,
 
@@ -886,7 +885,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 }
 
                 // Get the candidates for the individual version sets.
-                let version_set_candidates = &self.state.requirement_to_sorted_candidates[deps];
+                let version_set_candidates = &self.state.requirement_to_sorted_candidates[*deps];
 
                 // Iterate over all version sets in the requirement and find the first version
                 // set that we can act on, or if a single candidate (from any version set) makes
