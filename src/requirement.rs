@@ -124,8 +124,7 @@ impl<V> std::ops::Index<Requirement> for RequirementMap<V> {
 
     #[inline]
     fn index(&self, key: Requirement) -> &V {
-        self.get(key)
-            .expect("requirement has no entry in the map")
+        self.get(key).expect("requirement has no entry in the map")
     }
 }
 
