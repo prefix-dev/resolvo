@@ -631,6 +631,13 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// see [`Self::forbid_seen`] for why globally-deduplicating is safe.
     fn register_forbid_target(&mut self, name_id: NameId, variable: VariableId) {
         if self.forbid_seen.insert(variable) {
+            // Ensure name_activity covers this name_id. Candidates found via
+            // virtual provides may have a solvable_name() that differs from
+            // the queried package name, so on_candidates_available may never
+            // have resized for it.
+            if self.state.name_activity.len() <= name_id.to_usize() {
+                self.state.name_activity.resize(name_id.to_usize() + 1, 0.0);
+            }
             self.pending_forbid_clauses
                 .entry(name_id)
                 .or_default()
