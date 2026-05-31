@@ -169,6 +169,12 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
         &self.solvables[id]
     }
 
+    /// Returns an iterator over all solvables in the pool, yielding
+    /// `(SolvableId, &Solvable<V>)` pairs in allocation order.
+    pub fn iter_solvables(&self) -> impl Iterator<Item = (SolvableId, &Solvable<VS::V>)> {
+        self.solvables.iter()
+    }
+
     /// Interns a version set into the [`Pool`], returning its [`VersionSetId`].
     /// The returned [`VersionSetId`] can be used to retrieve a reference to
     /// the original version set using [`Self::resolve_version-set`].
