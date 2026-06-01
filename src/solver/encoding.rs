@@ -1,6 +1,10 @@
 use std::{any::Any, collections::VecDeque, future::ready};
 
-use super::{SolverState, clause::WatchedLiterals, conditions};
+use super::{
+    SolverConfig, SolverState,
+    clause::{Clause, WatchedLiterals},
+    conditions,
+};
 use crate::{
     Candidates, ConditionId, ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider,
     SolverCache, StringId, VariableId, VersionSetId,
@@ -32,6 +36,7 @@ type RequirementCondition<'a, S> = Option<(ConditionId, Vec<Vec<DisjunctionCompl
 pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     state: &'a mut SolverState<D>,
     cache: &'cache SolverCache<D>,
+    config: &'a SolverConfig,
     level: u32,
 
     /// The dependencies of the root solvable.
@@ -112,12 +117,14 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     pub fn new(
         state: &'a mut SolverState<D>,
         cache: &'cache SolverCache<D>,
+        config: &'a SolverConfig,
         root_dependencies: &'cache Dependencies,
         level: u32,
     ) -> Self {
         Self {
             state,
             cache,
+            config,
             root_dependencies,
             pending_futures: FuturesUnordered::new(),
             conflicting_clauses: Vec::new(),
@@ -447,6 +454,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             // Pairwise encoding: one (¬parent ∨ ¬candidate) clause per
             // excluded candidate.
             for &forbidden_candidate in candidates {
+                if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
+                    if self.config.forbid_self_conflicts {
+                        self.add_self_conflict_clause(variable, constraint);
+                    }
+                    continue;
+                }
                 let forbidden_candidate_var =
                     self.state.variable_map.intern_solvable(forbidden_candidate);
                 let (watched_literals, conflict, kind) = WatchedLiterals::constrains(
@@ -479,6 +492,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     .insert(constraint, aux_variable);
 
                 for &forbidden_candidate in candidates {
+                    if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
+                        if self.config.forbid_self_conflicts {
+                            self.add_self_conflict_clause(variable, constraint);
+                        }
+                        continue;
+                    }
                     let forbidden_candidate_var =
                         self.state.variable_map.intern_solvable(forbidden_candidate);
                     let (watched_literals, kind) = WatchedLiterals::constrains_excluded(
@@ -567,6 +586,19 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         }
 
         variable
+    }
+
+    /// Adds a unary constrains clause that forbids a solvable that conflicts
+    /// with something it also provides (a self-conflict).
+    fn add_self_conflict_clause(&mut self, variable: VariableId, constraint: VersionSetId) {
+        let kind = Clause::Constrains(variable, variable, constraint);
+        let clause_id = self.state.add_clause(None, kind);
+
+        self.state.negative_assertions.push((variable, clause_id));
+
+        if self.state.decision_tracker.assigned_value(variable) == Some(true) {
+            self.conflicting_clauses.push(clause_id);
+        }
     }
 
     /// Enqueues retrieving the dependencies for a solvable.

@@ -34,7 +34,9 @@ pub use id::{
 };
 use itertools::Itertools;
 pub use requirement::Requirement;
-pub use solver::{EmptySolvables, Problem, Solver, SolverCache, UnsolvableOrCancelled};
+pub use solver::{
+    EmptySolvables, Problem, Solver, SolverCache, SolverConfig, UnsolvableOrCancelled,
+};
 pub use solver_id::{DenseId, IdMap, IdSet, SolverId, SparseId};
 pub use utils::{IndexedSet, Mapping, MappingIter};
 

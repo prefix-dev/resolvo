@@ -7,7 +7,7 @@ use insta::assert_snapshot;
 use itertools::Itertools;
 use resolvo::{
     ConditionalRequirement, DependencyProvider, Interner, Problem, SolvableId, Solver,
-    UnsolvableOrCancelled, VersionSetId,
+    SolverConfig, UnsolvableOrCancelled, VersionSetId,
 };
 use tracing_test::traced_test;
 
@@ -1489,4 +1489,76 @@ fn test_constrains_multiple_parents() {
     pkg=7
     x=1
     "###);
+}
+
+/// When `forbid_self_conflicts` is false, a package that constrains itself
+/// is silently allowed. Some ecosystems (e.g. RPM) explicitly support this.
+/// The real-world examples are structured a bit differently however.
+#[test]
+fn test_self_conflict_allowed() {
+    let mut provider = BundleBoxProvider::new();
+    // a=1 constrains "a" to [2,100) — version 1 is NOT in that range,
+    // so a=1 appears as a non-matching candidate for its own constraint
+    // (i.e. a self-conflict).
+    provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+
+    let requirements = provider.requirements(&["a"]);
+    let config = SolverConfig {
+        forbid_self_conflicts: false,
+    };
+    let mut solver = Solver::new(provider).with_config(config);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r"
+    a=1
+    ");
+}
+
+/// When `forbid_self_conflicts` is true (the default), a package that
+/// constrains itself is marked uninstallable.
+#[test]
+fn test_self_conflict_forbidden() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+
+    let requirements = provider.requirements(&["a"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    match solver.solve(problem) {
+        Ok(_) => panic!("expected unsat due to self-conflict"),
+        Err(UnsolvableOrCancelled::Unsolvable(_)) => {}
+        Err(UnsolvableOrCancelled::Cancelled(_)) => {
+            panic!("expected unsolvable, not cancelled")
+        }
+    }
+}
+
+/// When `forbid_self_conflicts` is false and there are multiple versions,
+/// only the self-conflicting version is skipped — other versions of the
+/// same package are still constrained normally.
+#[test]
+fn test_self_conflict_allowed_multiple_versions() {
+    let mut provider = BundleBoxProvider::new();
+    // a=1 constrains "a" to [2,100) — a=1 itself is outside that range
+    // (self-conflict, skipped), but a=2 is inside, so no constraint on a=2.
+    // a=3 constrains "a" to [4,100) — a=3 itself is outside (self-conflict,
+    // skipped), but a=1 and a=2 are also outside so they ARE forbidden.
+    provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+    provider.add_package("a", 2.into(), &[], &[]);
+    provider.add_package("a", 3.into(), &[], &["a 4..100"]);
+
+    let requirements = provider.requirements(&["a"]);
+    let config = SolverConfig {
+        forbid_self_conflicts: false,
+    };
+    let mut solver = Solver::new(provider).with_config(config);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // a=3 is the highest version; its self-conflict is ignored, and it
+    // constrains a=1 and a=2 away normally.
+    assert_snapshot!(result, @r"
+    a=3
+    ");
 }
