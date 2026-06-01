@@ -682,9 +682,14 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     ) {
                         (Some(false), None) => Some(literal_b),
                         (None, Some(false)) => Some(literal_a),
-                        (Some(false), Some(false)) => unreachable!(
-                            "both literals cannot be false as that would be a conflict"
-                        ),
+                        (Some(false), Some(false)) => {
+                            // Both solvables are already decided true, but the
+                            // forbid clause that would have prevented this didn't
+                            // exist yet (it's being created right now). Report it
+                            // as a conflict so the solver can backtrack.
+                            self.conflicting_clauses.push(clause_id);
+                            return;
+                        }
                         _ => None,
                     };
                     if let Some(literal) = set_literal {
