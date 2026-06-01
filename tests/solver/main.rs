@@ -7,7 +7,7 @@ use insta::assert_snapshot;
 use itertools::Itertools;
 use resolvo::{
     ConditionalRequirement, DependencyProvider, Interner, Problem, SolvableId, Solver,
-    UnsolvableOrCancelled, VersionSetId,
+    SolverConfig, UnsolvableOrCancelled, VersionSetId,
 };
 use tracing_test::traced_test;
 
@@ -2108,6 +2108,77 @@ fn test_constrains_multiple_parents() {
     pkg=7
     x=1
     "###);
+}
+mod test_self_conflict {
+    use super::*;
+
+    /// When `forbid_self_conflicts` is false, a package that constrains itself
+    /// is silently allowed. Some ecosystems (e.g. RPM) explicitly support this.
+    /// The real-world examples are structured a bit differently however.
+    #[test]
+    fn test_self_conflict_allowed() {
+        let mut provider = BundleBoxProvider::new();
+        // a=1 constrains "a" to [2,100) — version 1 is NOT in that range,
+        // so a=1 appears as a non-matching candidate for its own constraint
+        // (i.e. a self-conflict).
+        provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+
+        let requirements = provider.requirements(&["a"]);
+        let config = SolverConfig {
+            forbid_self_conflicts: false,
+        };
+        let mut solver = Solver::new(provider).with_config(config);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+        a=1
+        ");
+    }
+
+    /// When `forbid_self_conflicts` is true (the default), a package that
+    /// constrains itself is marked uninstallable.
+    #[test]
+    fn test_self_conflict_forbidden() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+
+        let requirements = provider.requirements(&["a"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        match solver.solve(problem) {
+            Ok(_) => panic!("expected unsat due to self-conflict"),
+            Err(UnsolvableOrCancelled::Unsolvable(_)) => {}
+            Err(UnsolvableOrCancelled::Cancelled(_)) => {
+                panic!("expected unsolvable, not cancelled")
+            }
+        }
+    }
+
+    /// `allow_self_conflicts` works correctly when the self-conflicting
+    /// package is a transitive dependency discovered in a later solver pass.
+    #[test]
+    fn test_self_conflict_allowed_transitive() {
+        let mut provider = BundleBoxProvider::new();
+        // "a" has a self-conflict and is a transitive dep of "app" via "lib".
+        provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+        provider.add_package("lib", 1.into(), &["a"], &[]);
+        provider.add_package("app", 1.into(), &["lib"], &[]);
+
+        let requirements = provider.requirements(&["app"]);
+        let config = SolverConfig {
+            forbid_self_conflicts: false,
+        };
+        let mut solver = Solver::new(provider).with_config(config);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+        a=1
+        app=1
+        lib=1
+        ");
+    }
 }
 
 // ============================================================================
