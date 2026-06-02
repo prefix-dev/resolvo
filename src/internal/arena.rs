@@ -5,6 +5,8 @@ use std::cmp;
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
+use crate::id::DenseIndex;
+
 const CHUNK_SIZE: usize = 128;
 
 /// An `Arena<TValue>` holds a collection of `TValue`s but allocates persistent `TId`s that are used
@@ -17,19 +19,19 @@ const CHUNK_SIZE: usize = 128;
 ///
 /// Methods that mutable the arena (like clearing it) still require a mutable reference because they
 /// might invalidate existing references.
-pub(crate) struct Arena<TId: ArenaId, TValue> {
+pub(crate) struct Arena<TId: DenseIndex, TValue> {
     chunks: UnsafeCell<Vec<Vec<TValue>>>,
     len: Cell<usize>,
     phantom: PhantomData<TId>,
 }
 
-impl<TId: ArenaId, TValue> Default for Arena<TId, TValue> {
+impl<TId: DenseIndex, TValue> Default for Arena<TId, TValue> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<TId: ArenaId, TValue> Arena<TId, TValue> {
+impl<TId: DenseIndex, TValue> Arena<TId, TValue> {
     /// Constructs a new arena.
     pub(crate) fn new() -> Self {
         Arena::with_capacity(1)
@@ -76,7 +78,7 @@ impl<TId: ArenaId, TValue> Arena<TId, TValue> {
         }
         chunks[chunk_idx].push(value);
         self.len.set(id + 1);
-        TId::from_usize(id)
+        TId::from_index(id)
     }
 
     /// Returns an iterator over the elements of the arena.
@@ -105,8 +107,8 @@ impl<TId: ArenaId, TValue> Arena<TId, TValue> {
     ///
     /// Panics if one of the Ids is invalid or when the two ids are the same.
     pub fn get_two_mut(&mut self, a: TId, b: TId) -> (&mut TValue, &mut TValue) {
-        let a_index = a.to_usize();
-        let b_index = b.to_usize();
+        let a_index = a.to_index();
+        let b_index = b.to_index();
         debug_assert!(a_index < self.len());
         debug_assert!(b_index < self.len());
         debug_assert_ne!(a_index, b_index);
@@ -128,11 +130,11 @@ impl<TId: ArenaId, TValue> Arena<TId, TValue> {
     }
 }
 
-impl<TId: ArenaId, TValue> Index<TId> for Arena<TId, TValue> {
+impl<TId: DenseIndex, TValue> Index<TId> for Arena<TId, TValue> {
     type Output = TValue;
 
     fn index(&self, index: TId) -> &Self::Output {
-        let index = index.to_usize();
+        let index = index.to_index();
         assert!(index < self.len());
         let (chunk, offset) = Self::chunk_and_offset(index);
         unsafe {
@@ -142,9 +144,9 @@ impl<TId: ArenaId, TValue> Index<TId> for Arena<TId, TValue> {
     }
 }
 
-impl<TId: ArenaId, TValue> IndexMut<TId> for Arena<TId, TValue> {
+impl<TId: DenseIndex, TValue> IndexMut<TId> for Arena<TId, TValue> {
     fn index_mut(&mut self, index: TId) -> &mut Self::Output {
-        let index = index.to_usize();
+        let index = index.to_index();
         assert!(index < self.len());
         let (chunk, offset) = Self::chunk_and_offset(index);
         // SAFE: because we check that the index is less than the length
@@ -157,22 +159,13 @@ impl<TId: ArenaId, TValue> IndexMut<TId> for Arena<TId, TValue> {
     }
 }
 
-/// A trait indicating that the type can be transformed to `usize` and back
-pub trait ArenaId {
-    /// Constructs a new Id from an index.
-    fn from_usize(x: usize) -> Self;
-
-    /// Returns the index of the Id.
-    fn to_usize(self) -> usize;
-}
-
 /// An iterator over the elements of an [`Arena`].
-pub struct ArenaIter<'a, TId: ArenaId, TValue> {
+pub struct ArenaIter<'a, TId: DenseIndex, TValue> {
     arena: &'a Arena<TId, TValue>,
     index: usize,
 }
 
-impl<'a, TId: ArenaId, TValue> Iterator for ArenaIter<'a, TId, TValue> {
+impl<'a, TId: DenseIndex, TValue> Iterator for ArenaIter<'a, TId, TValue> {
     type Item = (TId, &'a TValue);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -181,7 +174,7 @@ impl<'a, TId: ArenaId, TValue> Iterator for ArenaIter<'a, TId, TValue> {
             let element = unsafe {
                 let vec = self.arena.chunks.get();
                 Some((
-                    TId::from_usize(self.index),
+                    TId::from_index(self.index),
                     (&(*vec)).get_unchecked(chunk).get_unchecked(offset),
                 ))
             };
@@ -195,12 +188,12 @@ impl<'a, TId: ArenaId, TValue> Iterator for ArenaIter<'a, TId, TValue> {
 }
 
 /// An mutable iterator over the elements of an [`Arena`].
-pub struct ArenaIterMut<'a, TId: ArenaId, TValue> {
+pub struct ArenaIterMut<'a, TId: DenseIndex, TValue> {
     arena: &'a mut Arena<TId, TValue>,
     index: usize,
 }
 
-impl<'a, TId: ArenaId, TValue> Iterator for ArenaIterMut<'a, TId, TValue> {
+impl<'a, TId: DenseIndex, TValue> Iterator for ArenaIterMut<'a, TId, TValue> {
     type Item = (TId, &'a mut TValue);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -209,7 +202,7 @@ impl<'a, TId: ArenaId, TValue> Iterator for ArenaIterMut<'a, TId, TValue> {
             let element = unsafe {
                 let vec = self.arena.chunks.get();
                 Some((
-                    TId::from_usize(self.index),
+                    TId::from_index(self.index),
                     (&mut (*vec))
                         .get_unchecked_mut(chunk)
                         .get_unchecked_mut(offset),

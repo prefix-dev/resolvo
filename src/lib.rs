@@ -13,11 +13,13 @@
 
 mod conditional_requirement;
 pub mod conflict;
+pub mod id;
 pub(crate) mod internal;
 mod requirement;
 pub mod runtime;
 pub mod snapshot;
 mod solver;
+pub mod solver_id;
 pub mod utils;
 
 use std::{
@@ -26,28 +28,35 @@ use std::{
 };
 
 pub use conditional_requirement::{Condition, ConditionalRequirement, LogicalOperator};
-pub use internal::arena::ArenaId;
-pub use internal::id::{
-    ConditionId, NameId, SolvableId, SolvableOrRootId, StringId, VersionSetId, VersionSetUnionId,
+pub use id::{
+    ConditionId, DenseIndex, NameId, NameTag, SolvableId, SolvableTag, StringId, VariableId,
+    VersionSetId, VersionSetUnionId,
 };
 use itertools::Itertools;
 pub use requirement::Requirement;
-pub use solver::{Problem, Solver, SolverCache, UnsolvableOrCancelled};
-pub use utils::{Mapping, MappingIter};
+pub use solver::{EmptySolvables, Problem, Solver, SolverCache, UnsolvableOrCancelled};
+pub use solver_id::{DenseId, IdMap, IdSet, SolverId, SparseId};
+pub use utils::{IndexedSet, Mapping, MappingIter};
 
 /// An object that is used by the solver to query certain properties of
 /// different internalized objects.
 pub trait Interner {
+    /// The package-name ID type used by this interner.
+    type NameId: SolverId;
+
+    /// The solvable ID type used by this interner.
+    type SolvableId: SolverId;
+
     /// Returns an object that can be used to display the given solvable in a
     /// user-friendly way.
     ///
     /// When formatting the solvable, it should it include both the name of
     /// the package and any other identifying properties.
-    fn display_solvable(&self, solvable: SolvableId) -> impl Display + '_;
+    fn display_solvable(&self, solvable: Self::SolvableId) -> impl Display + '_;
 
     /// Returns an object that can be used to display the name of a solvable in
     /// a user-friendly way.
-    fn display_solvable_name(&self, solvable: SolvableId) -> impl Display + '_ {
+    fn display_solvable_name(&self, solvable: Self::SolvableId) -> impl Display + '_ {
         self.display_name(self.solvable_name(solvable))
     }
 
@@ -58,7 +67,7 @@ pub trait Interner {
     ///
     /// When formatting the solvables, both the name of the package and any
     /// other identifying properties should be displayed.
-    fn display_merged_solvables(&self, solvables: &[SolvableId]) -> impl Display + '_ {
+    fn display_merged_solvables(&self, solvables: &[Self::SolvableId]) -> impl Display + '_ {
         if solvables.is_empty() {
             return String::new();
         }
@@ -76,7 +85,7 @@ pub trait Interner {
 
     /// Returns an object that can be used to display the given name in a
     /// user-friendly way.
-    fn display_name(&self, name: NameId) -> impl Display + '_;
+    fn display_name(&self, name: Self::NameId) -> impl Display + '_;
 
     /// Returns an object that can be used to display the given version set in a
     /// user-friendly way.
@@ -90,10 +99,10 @@ pub trait Interner {
 
     /// Returns the name of the package that the specified version set is
     /// associated with.
-    fn version_set_name(&self, version_set: VersionSetId) -> NameId;
+    fn version_set_name(&self, version_set: VersionSetId) -> Self::NameId;
 
     /// Returns the name of the package for the given solvable.
-    fn solvable_name(&self, solvable: SolvableId) -> NameId;
+    fn solvable_name(&self, solvable: Self::SolvableId) -> Self::NameId;
 
     /// Returns the version sets comprising the given union.
     ///
@@ -121,23 +130,23 @@ pub trait DependencyProvider: Sized + Interner {
     /// the version set.
     async fn filter_candidates(
         &self,
-        candidates: &[SolvableId],
+        candidates: &[Self::SolvableId],
         version_set: VersionSetId,
         inverse: bool,
-    ) -> Vec<SolvableId>;
+    ) -> Vec<Self::SolvableId>;
 
     /// Obtains a list of solvables that should be considered when a package
     /// with the given name is requested.
-    async fn get_candidates(&self, name: NameId) -> Option<Candidates>;
+    async fn get_candidates(&self, name: Self::NameId) -> Option<Candidates<Self::SolvableId>>;
 
     /// Sort the specified solvables based on which solvable to try first. The
     /// solver will iteratively try to select the highest version. If a
     /// conflict is found with the highest version the next version is
     /// tried. This continues until a solution is found.
-    async fn sort_candidates(&self, solver: &SolverCache<Self>, solvables: &mut [SolvableId]);
+    async fn sort_candidates(&self, solver: &SolverCache<Self>, solvables: &mut [Self::SolvableId]);
 
     /// Returns the dependencies for the specified solvable.
-    async fn get_dependencies(&self, solvable: SolvableId) -> Dependencies;
+    async fn get_dependencies(&self, solvable: Self::SolvableId) -> Dependencies;
 
     /// Whether the solver should stop the dependency resolution algorithm.
     ///
@@ -153,10 +162,10 @@ pub trait DependencyProvider: Sized + Interner {
 
 /// A list of candidate solvables for a specific package. This is returned from
 /// [`DependencyProvider::get_candidates`].
-#[derive(Default, Clone, Debug)]
-pub struct Candidates {
+#[derive(Clone, Debug)]
+pub struct Candidates<S = SolvableId> {
     /// A list of all solvables for the package.
-    pub candidates: Vec<SolvableId>,
+    pub candidates: Vec<S>,
 
     /// Optionally the id of the solvable that is favored over other solvables.
     /// The solver will first attempt to solve for the specified solvable
@@ -166,13 +175,13 @@ pub struct Candidates {
     /// The same behavior can be achieved by sorting this candidate to the top
     /// using the [`DependencyProvider::sort_candidates`] function but using
     /// this method provides better error messages to the user.
-    pub favored: Option<SolvableId>,
+    pub favored: Option<S>,
 
     /// If specified this is the Id of the only solvable that can be selected.
     /// Although it would also be possible to simply return a single
     /// candidate using this field provides better error messages to the
     /// user.
-    pub locked: Option<SolvableId>,
+    pub locked: Option<S>,
 
     /// A hint to the solver that the dependencies of some of the solvables are
     /// also directly available. This allows the solver to request the
@@ -183,21 +192,33 @@ pub struct Candidates {
     /// also be the case that the solver doesnt actually need this
     /// information to form a solution. In general though, if the
     /// dependencies can easily be provided one should provide them up-front.
-    pub hint_dependencies_available: HintDependenciesAvailable,
+    pub hint_dependencies_available: HintDependenciesAvailable<S>,
 
     /// A list of solvables that are available but have been excluded from the
     /// solver. For example, a package might be excluded from the solver
     /// because it is not compatible with the runtime. The solver will not
     /// consider these solvables when forming a solution but will use
     /// them in the error message if no solution could be found.
-    pub excluded: Vec<(SolvableId, StringId)>,
+    pub excluded: Vec<(S, StringId)>,
+}
+
+impl<S> Default for Candidates<S> {
+    fn default() -> Self {
+        Self {
+            candidates: Vec::new(),
+            favored: None,
+            locked: None,
+            hint_dependencies_available: HintDependenciesAvailable::None,
+            excluded: Vec::new(),
+        }
+    }
 }
 
 /// Defines for which candidates dependencies are available without the
 /// [`DependencyProvider`] having to perform extra work, e.g. it's cheap to
 /// request them.
 #[derive(Default, Clone, Debug)]
-pub enum HintDependenciesAvailable {
+pub enum HintDependenciesAvailable<S = SolvableId> {
     /// None of the dependencies are available up-front. The dependency provide
     /// will have to do work to find the dependencies.
     #[default]
@@ -209,7 +230,7 @@ pub enum HintDependenciesAvailable {
     /// Only the dependencies for the specified solvables are available.
     /// Querying the dependencies for these solvables is cheap. Querying
     /// dependencies for other solvables is expensive.
-    Some(Vec<SolvableId>),
+    Some(Vec<S>),
 }
 
 /// Holds information about the dependencies of a package.

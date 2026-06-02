@@ -1,6 +1,6 @@
 use std::{cmp, iter::FusedIterator, marker::PhantomData};
 
-use crate::internal::arena::ArenaId;
+use crate::id::DenseIndex;
 
 const VALUES_PER_CHUNK: usize = 128;
 
@@ -15,13 +15,13 @@ pub struct Mapping<TId, TValue> {
     _phantom: PhantomData<TId>,
 }
 
-impl<TId: ArenaId, TValue> Default for Mapping<TId, TValue> {
+impl<TId: DenseIndex, TValue> Default for Mapping<TId, TValue> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
+impl<TId: DenseIndex, TValue> Mapping<TId, TValue> {
     pub(crate) fn new() -> Self {
         Self::with_capacity(1)
     }
@@ -60,7 +60,7 @@ impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
 
     /// Insert into the mapping with the specific value
     pub fn insert(&mut self, id: TId, value: TValue) -> Option<TValue> {
-        let idx = id.to_usize();
+        let idx = id.to_index();
         let (chunk, offset) = Self::chunk_and_offset(idx);
 
         // Resize to fit if needed
@@ -78,7 +78,7 @@ impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
 
     /// Unset a specific value in the mapping, returns the previous value.
     pub fn unset(&mut self, id: TId) -> Option<TValue> {
-        let idx = id.to_usize();
+        let idx = id.to_index();
         let (chunk, offset) = Self::chunk_and_offset(idx);
         if chunk >= self.chunks.len() {
             return None;
@@ -93,7 +93,7 @@ impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
 
     /// Get a specific value in the mapping with bound checks
     pub fn get(&self, id: TId) -> Option<&TValue> {
-        let (chunk, offset) = Self::chunk_and_offset(id.to_usize());
+        let (chunk, offset) = Self::chunk_and_offset(id.to_index());
         if chunk >= self.chunks.len() {
             return None;
         }
@@ -109,7 +109,7 @@ impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
 
     /// Get a mutable specific value in the mapping with bound checks
     pub fn get_mut(&mut self, id: TId) -> Option<&mut TValue> {
-        let (chunk, offset) = Self::chunk_and_offset(id.to_usize());
+        let (chunk, offset) = Self::chunk_and_offset(id.to_index());
         if chunk >= self.chunks.len() {
             return None;
         }
@@ -130,7 +130,7 @@ impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
     /// `get_unchecked`. i.e. the id having been inserted into the Mapping
     /// before.
     pub unsafe fn get_unchecked(&self, id: TId) -> &TValue {
-        let (chunk, offset) = Self::chunk_and_offset(id.to_usize());
+        let (chunk, offset) = Self::chunk_and_offset(id.to_index());
         unsafe { self.chunks.get_unchecked(chunk).get_unchecked(offset) }
             .as_ref()
             .unwrap()
@@ -143,7 +143,7 @@ impl<TId: ArenaId, TValue> Mapping<TId, TValue> {
     /// `get_unchecked_mut`. i.e. the id having been inserted into the Mapping
     /// before.
     pub unsafe fn get_unchecked_mut(&mut self, id: TId) -> &mut TValue {
-        let (chunk, offset) = Self::chunk_and_offset(id.to_usize());
+        let (chunk, offset) = Self::chunk_and_offset(id.to_index());
         unsafe {
             self.chunks
                 .get_unchecked_mut(chunk)
@@ -189,7 +189,7 @@ pub struct MappingIter<'a, TId, TValue> {
     offset: usize,
 }
 
-impl<'a, TId: ArenaId, TValue> Iterator for MappingIter<'a, TId, TValue> {
+impl<'a, TId: DenseIndex, TValue> Iterator for MappingIter<'a, TId, TValue> {
     type Item = (TId, &'a TValue);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -199,7 +199,7 @@ impl<'a, TId: ArenaId, TValue> Iterator for MappingIter<'a, TId, TValue> {
             }
 
             let (chunk, offset) = Mapping::<TId, TValue>::chunk_and_offset(self.offset);
-            let id = TId::from_usize(self.offset);
+            let id = TId::from_index(self.offset);
             self.offset += 1;
 
             unsafe {
@@ -216,10 +216,10 @@ impl<'a, TId: ArenaId, TValue> Iterator for MappingIter<'a, TId, TValue> {
     }
 }
 
-impl<TId: ArenaId, TValue> FusedIterator for MappingIter<'_, TId, TValue> {}
+impl<TId: DenseIndex, TValue> FusedIterator for MappingIter<'_, TId, TValue> {}
 
 #[cfg(feature = "serde")]
-impl<K: ArenaId, V: serde::Serialize> serde::Serialize for Mapping<K, V> {
+impl<K: DenseIndex, V: serde::Serialize> serde::Serialize for Mapping<K, V> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.chunks
             .iter()
@@ -231,7 +231,7 @@ impl<K: ArenaId, V: serde::Serialize> serde::Serialize for Mapping<K, V> {
 }
 
 #[cfg(feature = "serde")]
-impl<'de, K: ArenaId, V: serde::Deserialize<'de>> serde::Deserialize<'de> for Mapping<K, V> {
+impl<'de, K: DenseIndex, V: serde::Deserialize<'de>> serde::Deserialize<'de> for Mapping<K, V> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -240,7 +240,7 @@ impl<'de, K: ArenaId, V: serde::Deserialize<'de>> serde::Deserialize<'de> for Ma
         let mut mapping = Mapping::with_capacity(values.len());
         for (i, value) in values.into_iter().enumerate() {
             if let Some(value) = value {
-                mapping.insert(K::from_usize(i), value);
+                mapping.insert(K::from_index(i), value);
             }
         }
         Ok(mapping)
@@ -255,12 +255,12 @@ mod tests {
         id: usize,
     }
 
-    impl ArenaId for Id {
-        fn from_usize(x: usize) -> Self {
+    impl DenseIndex for Id {
+        fn from_index(x: usize) -> Self {
             Id { id: x }
         }
 
-        fn to_usize(self) -> usize {
+        fn to_index(self) -> usize {
             self.id
         }
     }
@@ -274,17 +274,17 @@ mod tests {
 
         // Inserting a value should increase the length
         // and the number of slots should stay the same
-        mapping.insert(Id::from_usize(0), 10usize);
+        mapping.insert(Id::from_index(0), 10usize);
         assert_eq!(mapping.len(), 1);
 
         // Should be able to get it
-        assert_eq!(*mapping.get(Id::from_usize(0)).unwrap(), 10usize);
+        assert_eq!(*mapping.get(Id::from_index(0)).unwrap(), 10usize);
         assert_eq!(mapping.slots(), VALUES_PER_CHUNK);
 
         // Inserting higher than the slot size should trigger a resize
-        mapping.insert(Id::from_usize(VALUES_PER_CHUNK), 20usize);
+        mapping.insert(Id::from_index(VALUES_PER_CHUNK), 20usize);
         assert_eq!(
-            *mapping.get(Id::from_usize(VALUES_PER_CHUNK)).unwrap(),
+            *mapping.get(Id::from_index(VALUES_PER_CHUNK)).unwrap(),
             20usize
         );
 
@@ -307,7 +307,7 @@ mod tests {
                 .copied()
                 .enumerate()
                 .fold(Mapping::new(), |mut mapping, (i, v)| {
-                    mapping.insert(Id::from_usize(i), v);
+                    mapping.insert(Id::from_index(i), v);
                     mapping
                 });
 

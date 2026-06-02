@@ -1,13 +1,9 @@
 use std::fmt::Display;
 
-use ahash::HashMap;
-
 use crate::{
-    Interner, NameId, SolvableId,
-    internal::{
-        arena::ArenaId,
-        id::{SolvableOrRootId, VariableId},
-    },
+    DenseIndex, Interner, VariableId,
+    internal::solver_id::SolvableIdOrRoot,
+    solver_id::{IdMap, SolverId},
 };
 
 /// All variables in the solver are stored in a `VariableMap`. This map is used
@@ -16,86 +12,87 @@ use crate::{
 ///
 /// The `VariableMap` is responsible for assigning unique identifiers to each
 /// variable represented by [`VariableId`].
-pub struct VariableMap {
-    /// The id of the next variable to be allocated.
-    next_id: usize,
-
-    /// A map from solvable id to variable id.
-    solvable_to_variable: HashMap<SolvableId, VariableId>,
+pub(crate) struct VariableMap<N: SolverId, S: SolverId> {
+    /// A map from solvable id to variable id. Backed by the storage selected
+    /// by the [`Layout`] marker.
+    solvable_to_variable: S::Map<Option<VariableId>>,
 
     /// Records the origin of each variable, indexed by its [`VariableId`].
     ///
-    /// Invariant: `origins.len() == next_id`, i.e. every allocated variable
-    /// has its slot pushed in the same step it is handed out. Do not insert
-    /// gaps; [`Self::origin`] indexes directly.
-    origins: Vec<VariableOrigin>,
+    /// Invariant: every allocated variable has its slot pushed in the same step
+    /// it is handed out. Do not insert gaps; [`Self::origin`] indexes directly.
+    origins: Vec<VariableOrigin<N, S>>,
 }
 
 /// Describes the origin of a variable.
 #[derive(Clone, Copy, Debug)]
-pub enum VariableOrigin {
+pub(crate) enum VariableOrigin<N, S> {
     /// The variable is the root of the decision tree.
     Root,
 
     /// The variable represents a specific solvable.
-    Solvable(SolvableId),
+    Solvable(S),
 
     /// A variable that helps encode an at most one constraint.
-    ForbidMultiple(NameId),
+    ForbidMultiple(N),
 
     /// A variable that indicates that any solvable of a particular package is
     /// part of the solution.
-    AtLeastOne(NameId),
+    AtLeastOne(N),
 }
 
-impl Default for VariableMap {
+impl<N: SolverId, S: SolverId> Default for VariableMap<N, S> {
     fn default() -> Self {
         Self {
-            // The first variable id is 1 because 0 is reserved for the root.
-            next_id: 1,
-            solvable_to_variable: HashMap::default(),
+            solvable_to_variable: Default::default(),
+            // Index 0 is reserved for the root variable.
             origins: vec![VariableOrigin::Root],
         }
     }
 }
 
-impl VariableMap {
+impl<N: SolverId, S: SolverId> VariableMap<N, S> {
     /// Allocate a new variable with the given origin and hand back its id.
     ///
-    /// This is the single place that mutates `next_id`/`origins` together,
-    /// preserving the `origins.len() == next_id` invariant. Always extends
-    /// `origins` by exactly one slot.
-    fn alloc(&mut self, origin: VariableOrigin) -> VariableId {
-        let id = self.next_id;
-        self.next_id += 1;
-        debug_assert_eq!(id, self.origins.len());
+    /// This is the single place that mutates `origins`, preserving the
+    /// invariant that every variable has exactly one origin slot. Always
+    /// extends `origins` by exactly one slot.
+    fn alloc(&mut self, origin: VariableOrigin<N, S>) -> VariableId {
+        let id = self.origins.len();
         self.origins.push(origin);
-        VariableId::from_usize(id)
+        VariableId::from_index(id)
     }
 
     /// Allocate a variable for a new variable or reuse an existing one.
-    pub fn intern_solvable(&mut self, solvable_id: SolvableId) -> VariableId {
-        if let Some(&variable_id) = self.solvable_to_variable.get(&solvable_id) {
+    pub fn intern_solvable(&mut self, solvable_id: S) -> VariableId {
+        if let Some(variable_id) = self.solvable_to_variable.get(solvable_id) {
             return variable_id;
         }
         let variable_id = self.alloc(VariableOrigin::Solvable(solvable_id));
-        self.solvable_to_variable.insert(solvable_id, variable_id);
+        debug_assert!(
+            !variable_id.is_root(),
+            "intern_solvable must never hand out the root variable id"
+        );
+        self.solvable_to_variable
+            .set(solvable_id, Some(variable_id));
         variable_id
     }
 
     #[cfg(feature = "diagnostics")]
     pub fn count(&self) -> usize {
-        self.next_id
+        self.origins.len()
     }
 
     #[cfg(feature = "diagnostics")]
     pub fn size_in_bytes(&self) -> usize {
-        self.origins.capacity() * std::mem::size_of::<VariableOrigin>()
-            + self.solvable_to_variable.capacity() * std::mem::size_of::<(SolvableId, VariableId)>()
+        self.origins.capacity() * std::mem::size_of::<VariableOrigin<N, S>>()
     }
 
     /// Allocate a variable for a solvable or the root.
-    pub fn intern_solvable_or_root(&mut self, solvable_or_root_id: SolvableOrRootId) -> VariableId {
+    pub fn intern_solvable_or_root(
+        &mut self,
+        solvable_or_root_id: SolvableIdOrRoot<S>,
+    ) -> VariableId {
         match solvable_or_root_id.solvable() {
             Some(solvable_id) => self.intern_solvable(solvable_id),
             None => VariableId::root(),
@@ -103,38 +100,46 @@ impl VariableMap {
     }
 
     /// Allocate a variable that helps encode an at most one constraint.
-    pub fn alloc_forbid_multiple_variable(&mut self, name: NameId) -> VariableId {
+    pub fn alloc_forbid_multiple_variable(&mut self, name: N) -> VariableId {
         self.alloc(VariableOrigin::ForbidMultiple(name))
     }
 
     /// Allocate a variable helps encode whether at least one solvable for a
     /// particular package is selected.
-    pub fn alloc_at_least_one_variable(&mut self, name: NameId) -> VariableId {
+    pub fn alloc_at_least_one_variable(&mut self, name: N) -> VariableId {
         self.alloc(VariableOrigin::AtLeastOne(name))
     }
 
     /// Returns the origin of a variable. The origin describes the semantics of
     /// a variable.
-    pub fn origin(&self, variable_id: VariableId) -> VariableOrigin {
-        self.origins[variable_id.to_usize()]
+    #[inline]
+    pub fn origin(&self, variable_id: VariableId) -> VariableOrigin<N, S> {
+        self.origins[variable_id.to_index()]
     }
 }
 
 impl VariableId {
     /// Returns the solvable id associated with the variable if it represents a
     /// solvable.
-    pub fn as_solvable(self, variable_map: &VariableMap) -> Option<SolvableId> {
+    pub(crate) fn as_solvable<N: SolverId, S: SolverId>(
+        self,
+        variable_map: &VariableMap<N, S>,
+    ) -> Option<S> {
         variable_map.origin(self).as_solvable()
     }
 
-    pub fn as_solvable_or_root(self, variable_map: &VariableMap) -> Option<SolvableOrRootId> {
+    /// Returns the solvable-or-root id associated with the variable.
+    pub(crate) fn as_solvable_or_root<N: SolverId, S: SolverId>(
+        self,
+        variable_map: &VariableMap<N, S>,
+    ) -> Option<SolvableIdOrRoot<S>> {
         variable_map.origin(self).as_solvable_or_root()
     }
 
     /// Returns an object that can be used to format the variable.
-    pub fn display<'i, I: Interner>(
+    pub(crate) fn display<'i, I: Interner>(
         self,
-        variable_map: &'i VariableMap,
+        variable_map: &'i VariableMap<I::NameId, I::SolvableId>,
         interner: &'i I,
     ) -> VariableDisplay<'i, I> {
         VariableDisplay {
@@ -145,10 +150,10 @@ impl VariableId {
     }
 }
 
-pub struct VariableDisplay<'i, I: Interner> {
+pub(crate) struct VariableDisplay<'i, I: Interner> {
     variable: VariableId,
     interner: &'i I,
-    variable_map: &'i VariableMap,
+    variable_map: &'i VariableMap<I::NameId, I::SolvableId>,
 }
 
 impl<I: Interner> Display for VariableDisplay<'_, I> {
@@ -168,18 +173,18 @@ impl<I: Interner> Display for VariableDisplay<'_, I> {
     }
 }
 
-impl VariableOrigin {
-    pub fn as_solvable(&self) -> Option<SolvableId> {
+impl<N: SolverId, S: SolverId> VariableOrigin<N, S> {
+    pub(crate) fn as_solvable(&self) -> Option<S> {
         match self {
             VariableOrigin::Solvable(solvable_id) => Some(*solvable_id),
             _ => None,
         }
     }
 
-    pub fn as_solvable_or_root(&self) -> Option<SolvableOrRootId> {
+    pub(crate) fn as_solvable_or_root(&self) -> Option<SolvableIdOrRoot<S>> {
         match self {
             VariableOrigin::Solvable(solvable_id) => Some((*solvable_id).into()),
-            VariableOrigin::Root => Some(SolvableOrRootId::root()),
+            VariableOrigin::Root => Some(SolvableIdOrRoot::root()),
             _ => None,
         }
     }

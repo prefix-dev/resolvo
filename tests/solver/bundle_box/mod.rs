@@ -236,6 +236,9 @@ impl BundleBoxProvider {
 }
 
 impl Interner for BundleBoxProvider {
+    type NameId = NameId;
+    type SolvableId = SolvableId;
+
     fn display_solvable(&self, solvable: SolvableId) -> impl Display + '_ {
         let solvable = self.pool.resolve_solvable(solvable);
         format!("{}={}", self.display_name(solvable.name), solvable.record)

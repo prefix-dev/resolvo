@@ -2,12 +2,12 @@ use std::marker::PhantomData;
 
 use bitvec::vec::BitVec;
 
-use crate::internal::arena::ArenaId;
+use crate::id::DenseIndex;
 
-/// A dense set keyed by an [`ArenaId`]. Equivalent to a `HashSet<Id>` but
+/// A dense set keyed by a [`DenseIndex`]. Equivalent to a `HashSet<Id>` but
 /// backed by a [`BitVec`], so test-and-set is O(1) with no hashing overhead.
 /// Grows on demand to fit the largest inserted index.
-pub(crate) struct IndexedSet<Id> {
+pub struct IndexedSet<Id> {
     bits: BitVec,
     _marker: PhantomData<fn(Id) -> Id>,
 }
@@ -21,10 +21,11 @@ impl<Id> Default for IndexedSet<Id> {
     }
 }
 
-impl<Id: ArenaId> IndexedSet<Id> {
+impl<Id: DenseIndex> IndexedSet<Id> {
     /// Inserts `id`. Returns `true` if `id` was not already present.
+    #[inline]
     pub fn insert(&mut self, id: Id) -> bool {
-        let idx = id.to_usize();
+        let idx = id.to_index();
         if idx >= self.bits.len() {
             self.bits.resize(idx + 1, false);
         }
@@ -33,7 +34,8 @@ impl<Id: ArenaId> IndexedSet<Id> {
     }
 
     /// Returns `true` if `id` is present.
+    #[inline]
     pub fn contains(&self, id: Id) -> bool {
-        self.bits.get(id.to_usize()).is_some_and(|b| *b)
+        self.bits.get(id.to_index()).is_some_and(|b| *b)
     }
 }

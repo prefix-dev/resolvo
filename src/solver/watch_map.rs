@@ -1,6 +1,6 @@
 use crate::{
-    Mapping,
-    internal::{arena::ArenaId, debug_expect_unchecked, id::ClauseId},
+    DenseIndex, Mapping,
+    internal::{debug_expect_unchecked, id::ClauseId},
     solver::clause::{Literal, WatchedLiterals},
 };
 
@@ -40,13 +40,14 @@ impl WatchMap {
     /// Returns a [`WatchMapCursor`] that can be used to navigate and manipulate
     /// the linked list of the clauses that are watching the specified
     /// literal.
+    #[inline]
     pub fn cursor<'a>(
         &'a mut self,
         watches: &'a mut [Option<WatchedLiterals>],
         literal: Literal,
     ) -> Option<WatchMapCursor<'a>> {
         let clause_id = *self.map.get(literal)?;
-        let watched_literal = watches[clause_id.to_usize()]
+        let watched_literal = watches[clause_id.to_index()]
             .as_ref()
             .expect("no watches found for clause");
         let watch_index = if watched_literal.watched_literals[0] == literal {
@@ -109,6 +110,7 @@ pub struct WatchMapCursor<'a> {
 impl WatchMapCursor<'_> {
     /// Skip to the next node in the linked list. Returns `None` if there is no
     /// next node.
+    #[inline]
     pub fn next(mut self) -> Option<Self> {
         let next = self.next_node()?;
 
@@ -119,10 +121,11 @@ impl WatchMapCursor<'_> {
     }
 
     /// Returns the next node in the linked list or `None` if there is no next.
+    #[inline]
     fn next_node(&self) -> Option<WatchNode> {
         let current_watch = self.watched_literals();
         let next_clause_id = current_watch.next_watches[self.current.watch_index]?;
-        let next_watch = self.watches[next_clause_id.to_usize()]
+        let next_watch = self.watches[next_clause_id.to_index()]
             .as_ref()
             .expect("watches are missing");
         let next_clause_watch_index = if next_watch.watched_literals[0] == self.literal {
@@ -142,22 +145,56 @@ impl WatchMapCursor<'_> {
     }
 
     /// The current clause that is being navigated.
+    #[inline]
     pub fn clause_id(&self) -> ClauseId {
         self.current.clause_id
     }
 
     /// Returns the watches of the current clause.
+    #[inline]
     pub fn watched_literals(&self) -> &WatchedLiterals {
         // SAFETY: Within the cursor, the current clause is always watching literals.
         unsafe {
             debug_expect_unchecked(
-                self.watches[self.current.clause_id.to_usize()].as_ref(),
+                self.watches[self.current.clause_id.to_index()].as_ref(),
                 "clause is not watching literals",
             )
         }
     }
 
+    /// Issues a software prefetch hint for the next clause's `WatchedLiterals`,
+    /// if there is one. This is a pure hint to the CPU's prefetcher with no
+    /// observable side-effects. Used to overlap memory latency on the
+    /// linked-list traversal with the current iteration's compute.
+    #[inline]
+    pub fn prefetch_next(&self) {
+        let current_watch = self.watched_literals();
+        if let Some(next_id) = current_watch.next_watches[self.current.watch_index] {
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                core::arch::x86_64::_mm_prefetch(
+                    self.watches.as_ptr().add(next_id.to_index()) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                );
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                // Best-effort prefetch on aarch64. Stable Rust doesn't expose a
+                // user-mode prefetch intrinsic, so we just read a single byte
+                // which the CPU's prefetcher may pick up as a hint.
+                let _ = unsafe {
+                    self.watches
+                        .as_ptr()
+                        .add(next_id.to_index())
+                        .cast::<u8>()
+                        .read_volatile()
+                };
+            }
+        }
+    }
+
     /// Returns the index of the current watch in the current clause.
+    #[inline]
     pub fn watch_index(&self) -> usize {
         self.current.watch_index
     }
@@ -167,13 +204,14 @@ impl WatchMapCursor<'_> {
     ///
     /// Returns a cursor that points to the next node in the linked list or
     /// `None` if there is no next.
+    #[inline]
     pub fn update(mut self, new_watch: Literal) -> Option<Self> {
         debug_assert_ne!(
             new_watch, self.literal,
             "cannot update watch to the same literal"
         );
 
-        let clause_idx = self.current.clause_id.to_usize();
+        let clause_idx = self.current.clause_id.to_index();
         let next_node = self.next_node();
 
         // Update the previous node to point to the next node in the linked list
@@ -184,7 +222,7 @@ impl WatchMapCursor<'_> {
             // previous index there will also be watch literals for that clause.
             let previous_watches = unsafe {
                 debug_expect_unchecked(
-                    self.watches[previous.clause_id.to_usize()].as_mut(),
+                    self.watches[previous.clause_id.to_index()].as_mut(),
                     "previous clause has no watches",
                 )
             };

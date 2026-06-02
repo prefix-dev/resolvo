@@ -23,13 +23,13 @@ pub struct SolvableId {
 
 impl From<resolvo::SolvableId> for SolvableId {
     fn from(id: resolvo::SolvableId) -> Self {
-        Self { id: id.0 }
+        Self { id: id.into_raw() }
     }
 }
 
 impl From<SolvableId> for resolvo::SolvableId {
     fn from(id: SolvableId) -> Self {
-        Self(id.id)
+        Self::from_raw(id.id)
     }
 }
 
@@ -128,13 +128,13 @@ pub struct NameId {
 
 impl From<resolvo::NameId> for NameId {
     fn from(id: resolvo::NameId) -> Self {
-        Self { id: id.0 }
+        Self { id: id.into_raw() }
     }
 }
 
 impl From<NameId> for resolvo::NameId {
     fn from(id: NameId) -> Self {
-        Self(id.id)
+        Self::from_raw(id.id)
     }
 }
 
@@ -442,6 +442,9 @@ pub struct DependencyProvider {
 }
 
 impl resolvo::Interner for &DependencyProvider {
+    type NameId = resolvo::NameId;
+    type SolvableId = resolvo::SolvableId;
+
     fn display_solvable(&self, solvable: resolvo::SolvableId) -> impl Display + '_ {
         let mut result = String::default();
         unsafe { (self.display_solvable)(self.data, solvable.into(), NonNull::from(&mut result)) }

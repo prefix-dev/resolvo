@@ -1,5 +1,5 @@
-use crate::internal::id::{ClauseId, VariableId};
 use crate::solver::{decision::Decision, decision_map::DecisionMap};
+use crate::{VariableId, internal::id::ClauseId};
 
 /// Tracks the assignments to solvables, keeping a log that can be used to backtrack, and a map that
 /// can be used to query the current value assigned
@@ -25,6 +25,7 @@ impl DecisionTracker {
         self.map.value(variable_id)
     }
 
+    #[inline]
     pub(crate) fn map(&self) -> &DecisionMap {
         &self.map
     }
@@ -51,6 +52,7 @@ impl DecisionTracker {
     /// Returns true if the solvable was undecided, false if it was already decided to the same value
     ///
     /// Returns an error if the solvable was decided to a different value (which means there is a conflict)
+    #[inline]
     pub(crate) fn try_add_decision(&mut self, decision: Decision, level: u32) -> Result<bool, ()> {
         match self.map.value(decision.variable) {
             None => {
@@ -91,6 +93,7 @@ impl DecisionTracker {
     /// Returns the next decision in the log for which unit propagation still needs to run
     ///
     /// Side-effect: the decision will be marked as propagated
+    #[inline]
     pub(crate) fn next_unpropagated(&mut self) -> Option<Decision> {
         let &decision = self.stack[self.propagate_index..].iter().next()?;
         self.propagate_index += 1;

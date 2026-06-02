@@ -6,12 +6,8 @@ use std::{
 
 use crate::{
     Condition, ConditionId,
-    internal::{
-        arena::Arena,
-        frozen_copy_map::FrozenCopyMap,
-        id::{NameId, SolvableId, StringId, VersionSetId, VersionSetUnionId},
-        small_vec::SmallVec,
-    },
+    id::{NameId, SolvableId, StringId, VersionSetId, VersionSetUnionId},
+    internal::{arena::Arena, frozen_copy_map::FrozenCopyMap, small_vec::SmallVec},
 };
 
 /// A solvable represents a single candidate of a package.

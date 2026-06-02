@@ -12,7 +12,10 @@ use resolvo::{
 use tracing_test::traced_test;
 
 /// Create a string from a [`Transaction`]
-fn transaction_to_string(interner: &impl Interner, solvables: &[SolvableId]) -> String {
+fn transaction_to_string(
+    interner: &impl Interner<SolvableId = SolvableId>,
+    solvables: &[SolvableId],
+) -> String {
     use std::fmt::Write;
     let mut buf = String::new();
     for solvable in solvables
@@ -1042,7 +1045,7 @@ fn serialize_snapshot(
     serde_json::to_writer_pretty(file, snapshot).unwrap()
 }
 
-fn solve_for_snapshot<D: DependencyProvider>(
+fn solve_for_snapshot<D: DependencyProvider<NameId = resolvo::NameId, SolvableId = SolvableId>>(
     provider: D,
     root_reqs: &[ConditionalRequirement],
     root_constraints: &[VersionSetId],
