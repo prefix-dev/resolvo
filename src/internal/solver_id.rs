@@ -70,10 +70,9 @@ impl<S: SolverId> IdSet<SolvableIdOrRoot<S>> for WithRootSet<S> {
     }
 }
 
-/// Interior-mutable wrapper around an [`IdMap`].
-///
-/// This keeps the same single-threaded, no-reference-returning aliasing model
-/// as the solver's previous specialized frozen storage.
+/// A struct around a map that only allows returning copies. This ensures that
+/// immutable access is safe in both a mutable and immutable context because
+/// one cannot acquire references that can becomes stale.
 pub(crate) struct Frozen<T>(UnsafeCell<T>);
 
 impl<T: Default> Default for Frozen<T> {
@@ -98,5 +97,19 @@ impl<T> Frozen<T> {
         // SAFETY: `get`/`set` only move `Copy` values, so no references into M
         // can be invalidated by mutation.
         unsafe { (*self.0.get()).set(key, value) }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use std::num::NonZeroU32;
+
+    #[test]
+    fn nich_optimization_applies() {
+        assert!(
+            std::mem::size_of::<SolvableIdOrRoot<NonZeroU32>>()
+                == std::mem::size_of::<NonZeroU32>()
+        );
     }
 }

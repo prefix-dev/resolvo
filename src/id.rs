@@ -119,28 +119,32 @@ pub enum SolvableTag {}
 pub struct VariableId(NonZeroU32);
 
 impl VariableId {
+    const ROOT_ID: u32 = 1;
+
     /// Returns the variable id representing the root of the decision tree.
     pub fn root() -> Self {
         // SAFETY: 1 is non-zero.
-        Self(unsafe { NonZeroU32::new_unchecked(1) })
+        Self(unsafe { NonZeroU32::new_unchecked(Self::ROOT_ID) })
     }
 
     /// Returns `true` if this variable represents the root.
     pub fn is_root(self) -> bool {
-        self.0.get() == 1
+        self.0.get() == Self::ROOT_ID
     }
 }
 
 impl DenseIndex for VariableId {
     #[inline]
     fn from_index(x: usize) -> Self {
-        let raw: u32 = (x + 1).try_into().expect("variable id too big");
+        let raw: u32 = (x + Self::ROOT_ID as usize)
+            .try_into()
+            .expect("variable id too big");
         // SAFETY: `raw` is `x + 1`, hence at least 1, hence non-zero.
         Self(unsafe { NonZeroU32::new_unchecked(raw) })
     }
 
     #[inline]
     fn to_index(self) -> usize {
-        (self.0.get() - 1) as usize
+        (self.0.get() - Self::ROOT_ID) as usize
     }
 }
