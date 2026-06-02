@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.3...resolvo-v0.10.4) - 2026-06-02
+
+### Other
+
+- Add Pool::iter_solvables() ([#229](https://github.com/prefix-dev/resolvo/pull/229))
+- *(ci)* bump prefix-dev/setup-pixi from 0.9.5 to 0.9.6 ([#227](https://github.com/prefix-dev/resolvo/pull/227))
+- fix duplicated header and reorder entries in CHANGELOG ([#226](https://github.com/prefix-dev/resolvo/pull/226))
+- minor performance optimizations ([#223](https://github.com/prefix-dev/resolvo/pull/223))
+
 ## [0.10.3](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.2...resolvo-v0.10.3) - 2026-05-20
 
 ### Other
