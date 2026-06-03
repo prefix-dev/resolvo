@@ -450,6 +450,20 @@ fn test_unsat_no_candidates_for_child_2() {
     insta::assert_snapshot!(error);
 }
 
+// Versions requiring different versions of a missing dependency are each
+// reported (conda/rattler#2476).
+#[test]
+fn test_unsat_no_candidates_distinct_requirements() {
+    let provider = BundleBoxProvider::from_packages(&[
+        ("a", 1, vec!["b 41..42"]),
+        ("a", 2, vec!["b 41..42"]),
+        ("a", 3, vec!["b 42..43"]),
+        ("a", 4, vec!["b 43..44"]),
+    ]);
+    let error = solve_unsat(provider, &["a"]);
+    insta::assert_snapshot!(error);
+}
+
 #[test]
 fn test_unsat_missing_top_level_dep_1() {
     let provider = BundleBoxProvider::from_packages(&[("asdf", 1, vec![])]);

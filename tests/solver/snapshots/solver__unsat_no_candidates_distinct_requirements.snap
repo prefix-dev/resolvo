@@ -1,0 +1,11 @@
+---
+source: tests/solver/main.rs
+expression: error
+---
+a * cannot be installed because there are no viable options:
+├─ a 4 would require
+│  └─ b >=43, <44, for which no candidates were found.
+├─ a 3 would require
+│  └─ b >=42, <43, for which no candidates were found.
+└─ a 1 | 2 would require
+   └─ b >=41, <42, for which no candidates were found.
