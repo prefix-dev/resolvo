@@ -736,6 +736,34 @@ fn test_solve_with_additional() {
         "###);
 }
 
+/// Test that a soft requirement which conflicts with the hard solution is
+/// handled correctly when forbid clauses are created lazily.
+///
+/// Only a=1 matches the hard requirement. The soft requirement a=2 has a
+/// circular dependency on "a", so encoding it registers both a=1 and a=2 as
+/// forbid targets after both are already decided true. The solver should
+/// detect the conflict and exclude a=2 from the solution.
+#[test]
+fn test_solve_with_soft_requirement_forbid_clause_conflict() {
+    let mut provider = BundleBoxProvider::from_packages(&[("a", 1, vec![]), ("a", 2, vec!["a"])]);
+
+    // Only a=1 matches the hard requirement, so a=2 is never a matching
+    // candidate during the hard solve and no forbid clause is created.
+    let requirements = provider.requirements(&["a 1..2"]);
+    let extra_solvables = [provider.solvable_id("a", 2)];
+
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new()
+        .requirements(requirements)
+        .soft_requirements(extra_solvables);
+    let solved = solver.solve(problem).unwrap();
+
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r###"
+    a=1
+    "###);
+}
+
 #[test]
 fn test_solve_with_additional_with_constrains() {
     let mut provider = BundleBoxProvider::from_packages(&[
