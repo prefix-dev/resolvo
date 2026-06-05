@@ -1,0 +1,13 @@
+---
+source: tests/solver/main.rs
+expression: result
+---
+The following packages are incompatible
+├─ kmod-a * can be installed with any of the following options:
+│  └─ kmod-a 1 would require
+│     └─ kernel >=1, <2, which can be installed with any of the following options:
+│        └─ kernel 1
+└─ kmod-b * cannot be installed because there are no viable options:
+   └─ kmod-b 1 would require
+      └─ kernel >=3, <4, which cannot be installed because there are no viable options:
+         └─ kernel 3, which conflicts with the versions reported above.

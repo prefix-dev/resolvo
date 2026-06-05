@@ -63,6 +63,13 @@ fn main() -> anyhow::Result<()> {
         "resolvo_string_from_bytes".into(),
     ]);
     config.export.body.insert(
+        "Candidates".to_owned(),
+        r"
+    Candidates() : candidates{}, favored(nullptr), locked(nullptr), hint_dependencies_available{}, excluded{}, allow_multiple(false) {}
+        "
+        .to_owned(),
+    );
+    config.export.body.insert(
         "Slice".to_owned(),
         r"
     const T &operator[](int i) const { return ptr[i]; }
