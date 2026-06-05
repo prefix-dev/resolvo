@@ -440,14 +440,16 @@ impl<S: SolverId> ConflictGraph<S> {
                 | ConflictNode::Excluded(_) => continue,
             };
 
+            // Candidates that require different version sets stay separate so each
+            // distinct requirement is reported to the user (conda/rattler#2476).
             let predecessors: Vec<_> = graph
                 .edges_directed(node_id, Direction::Incoming)
-                .map(|e| e.source())
+                .map(|e| (e.weight().try_requires(), e.source()))
                 .sorted_unstable()
                 .collect();
             let successors: Vec<_> = graph
                 .edges(node_id)
-                .map(|e| e.target())
+                .map(|e| (e.weight().try_requires(), e.target()))
                 .sorted_unstable()
                 .collect();
 
