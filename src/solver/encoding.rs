@@ -1,7 +1,7 @@
 use std::{any::Any, collections::VecDeque, future::ready};
 
 use super::{
-    SolverConfig, SolverState,
+    SolverState,
     clause::{Clause, WatchedLiterals},
     conditions,
 };
@@ -36,7 +36,6 @@ type RequirementCondition<'a, S> = Option<(ConditionId, Vec<Vec<DisjunctionCompl
 pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     state: &'a mut SolverState<D>,
     cache: &'cache SolverCache<D>,
-    config: &'a SolverConfig,
     level: u32,
 
     /// The dependencies of the root solvable.
@@ -117,14 +116,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     pub fn new(
         state: &'a mut SolverState<D>,
         cache: &'cache SolverCache<D>,
-        config: &'a SolverConfig,
         root_dependencies: &'cache Dependencies,
         level: u32,
     ) -> Self {
         Self {
             state,
             cache,
-            config,
             root_dependencies,
             pending_futures: FuturesUnordered::new(),
             conflicting_clauses: Vec::new(),
@@ -270,6 +267,10 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             "Package candidates available for {}",
             self.cache.provider().display_name(name_id)
         );
+
+        if package_candidates.allow_self_conflicts {
+            self.state.allow_self_conflicts_names.insert(name_id);
+        }
 
         // If there is a locked solvable, forbid all other candidates
         if let Some(locked_solvable_id) = package_candidates.locked {
@@ -455,7 +456,8 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             // excluded candidate.
             for &forbidden_candidate in candidates {
                 if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
-                    if self.config.forbid_self_conflicts {
+                    let name_id = self.cache.provider().solvable_name(forbidden_candidate);
+                    if !self.state.allow_self_conflicts_names.contains(name_id) {
                         self.add_self_conflict_clause(variable, constraint);
                     }
                     continue;
@@ -493,7 +495,8 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
                 for &forbidden_candidate in candidates {
                     if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
-                        if self.config.forbid_self_conflicts {
+                        let name_id = self.cache.provider().solvable_name(forbidden_candidate);
+                        if !self.state.allow_self_conflicts_names.contains(name_id) {
                             self.add_self_conflict_clause(variable, constraint);
                         }
                         continue;

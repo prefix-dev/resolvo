@@ -7,7 +7,7 @@ use insta::assert_snapshot;
 use itertools::Itertools;
 use resolvo::{
     ConditionalRequirement, DependencyProvider, Interner, Problem, SolvableId, Solver,
-    SolverConfig, UnsolvableOrCancelled, VersionSetId,
+    UnsolvableOrCancelled, VersionSetId,
 };
 use tracing_test::traced_test;
 
@@ -1501,12 +1501,10 @@ fn test_self_conflict_allowed() {
     // so a=1 appears as a non-matching candidate for its own constraint
     // (i.e. a self-conflict).
     provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+    provider.set_allow_self_conflicts("a");
 
     let requirements = provider.requirements(&["a"]);
-    let config = SolverConfig {
-        forbid_self_conflicts: false,
-    };
-    let mut solver = Solver::new(provider).with_config(config);
+    let mut solver = Solver::new(provider);
     let problem = Problem::new().requirements(requirements);
     let solved = solver.solve(problem).unwrap();
     let result = transaction_to_string(solver.provider(), &solved);
@@ -1547,12 +1545,10 @@ fn test_self_conflict_allowed_multiple_versions() {
     provider.add_package("a", 1.into(), &[], &["a 2..100"]);
     provider.add_package("a", 2.into(), &[], &[]);
     provider.add_package("a", 3.into(), &[], &["a 4..100"]);
+    provider.set_allow_self_conflicts("a");
 
     let requirements = provider.requirements(&["a"]);
-    let config = SolverConfig {
-        forbid_self_conflicts: false,
-    };
-    let mut solver = Solver::new(provider).with_config(config);
+    let mut solver = Solver::new(provider);
     let problem = Problem::new().requirements(requirements);
     let solved = solver.solve(problem).unwrap();
     let result = transaction_to_string(solver.provider(), &solved);
@@ -1560,5 +1556,28 @@ fn test_self_conflict_allowed_multiple_versions() {
     // constrains a=1 and a=2 away normally.
     assert_snapshot!(result, @r"
     a=3
+    ");
+}
+
+/// `allow_self_conflicts` works correctly when the self-conflicting
+/// package is a transitive dependency discovered in a later solver pass.
+#[test]
+fn test_self_conflict_allowed_transitive() {
+    let mut provider = BundleBoxProvider::new();
+    // "a" has a self-conflict and is a transitive dep of "app" via "lib".
+    provider.add_package("a", 1.into(), &[], &["a 2..100"]);
+    provider.set_allow_self_conflicts("a");
+    provider.add_package("lib", 1.into(), &["a"], &[]);
+    provider.add_package("app", 1.into(), &["lib"], &[]);
+
+    let requirements = provider.requirements(&["app"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r"
+    a=1
+    app=1
+    lib=1
     ");
 }

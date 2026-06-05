@@ -531,6 +531,7 @@ impl DependencyProvider for SnapshotProvider<'_> {
                     .filter(|&s| self.solvable(s).hint_dependencies_available)
                     .collect(),
             ),
+            allow_self_conflicts: false,
         })
     }
 

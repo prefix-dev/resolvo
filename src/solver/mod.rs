@@ -175,23 +175,6 @@ impl<N> Clauses<N> {
 
 type RequirementCandidateVariables = Vec<Vec<VariableId>>;
 
-/// Configuration options for the solver.
-#[derive(Debug, Clone)]
-pub struct SolverConfig {
-    /// When `true`, a package that conflicts with something it also provides
-    /// (i.e. it conflicts with itself) is marked uninstallable. When `false`,
-    /// self-conflicts are silently ignored.
-    pub forbid_self_conflicts: bool,
-}
-
-impl Default for SolverConfig {
-    fn default() -> Self {
-        Self {
-            forbid_self_conflicts: true,
-        }
-    }
-}
-
 /// Drives the SAT solving process.
 pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
     /// The runtime to use for async operations.
@@ -202,9 +185,6 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
 
     /// Holds the current state of the solver.
     pub(crate) state: SolverState<D>,
-
-    /// Solver configuration options.
-    config: SolverConfig,
 
     /// The activity add factor. This is a value that is added to the activity
     /// score of each package that is part of a conflict.
@@ -239,6 +219,7 @@ pub(crate) struct SolverState<D: DependencyProvider> {
 
     clauses_added_for_package: <D::NameId as SolverId>::Set,
     clauses_added_for_solvable: WithRootSet<D::SolvableId>,
+    pub(crate) allow_self_conflicts_names: <D::NameId as SolverId>::Set,
     at_most_one_trackers: HashMap<D::NameId, AtMostOnceTracker<VariableId>>,
 
     /// Keeps track of auxiliary variables that are used to encode at-least-one
@@ -274,6 +255,7 @@ impl<D: DependencyProvider> Default for SolverState<D> {
             disjunctions: Default::default(),
             clauses_added_for_package: Default::default(),
             clauses_added_for_solvable: Default::default(),
+            allow_self_conflicts_names: Default::default(),
             at_most_one_trackers: Default::default(),
             at_least_one_tracker: Default::default(),
             constrains_aux_vars: Default::default(),
@@ -349,7 +331,6 @@ impl<D: DependencyProvider> Solver<D, NowOrNeverRuntime> {
             cache: SolverCache::new(provider),
             async_runtime: NowOrNeverRuntime,
             state: SolverState::default(),
-            config: SolverConfig::default(),
             activity_add: 1.0,
             activity_decay: 0.95,
         }
@@ -419,7 +400,6 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             async_runtime: runtime,
             cache: self.cache,
             state: self.state,
-            config: self.config,
             activity_decay: self.activity_decay,
             activity_add: self.activity_add,
         }
@@ -434,12 +414,6 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             activity_decay: decay,
             ..self
         }
-    }
-
-    /// Set the solver configuration.
-    #[must_use]
-    pub fn with_config(self, config: SolverConfig) -> Self {
-        Self { config, ..self }
     }
 
     /// Solves the given [`Problem`].
@@ -605,7 +579,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 #[cfg(feature = "diagnostics")]
                 let encoding_start = std::time::Instant::now();
                 let conflicting_clauses = self.async_runtime.block_on(
-                    Encoder::new(&mut self.state, &self.cache, &self.config, root_deps, level)
+                    Encoder::new(&mut self.state, &self.cache, root_deps, level)
                         .encode([root_solvable]),
                 )?;
                 #[cfg(feature = "diagnostics")]
@@ -729,7 +703,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             #[cfg(feature = "diagnostics")]
             let encoding_start = std::time::Instant::now();
             let conflicting_clauses = self.async_runtime.block_on(
-                Encoder::new(&mut self.state, &self.cache, &self.config, root_deps, level)
+                Encoder::new(&mut self.state, &self.cache, root_deps, level)
                     .encode(solvable_ids.iter().copied()),
             )?;
             #[cfg(feature = "diagnostics")]
