@@ -200,6 +200,10 @@ pub struct Candidates<S = SolvableId> {
     /// consider these solvables when forming a solution but will use
     /// them in the error message if no solution could be found.
     pub excluded: Vec<(S, StringId)>,
+    /// When `true`, the solver allows multiple solvables of this package to
+    /// appear in the solution simultaneously. By default only one version of
+    /// each package can be selected.
+    pub allow_multiple: bool,
 }
 
 impl<S> Default for Candidates<S> {
@@ -210,6 +214,7 @@ impl<S> Default for Candidates<S> {
             locked: None,
             hint_dependencies_available: HintDependenciesAvailable::None,
             excluded: Vec::new(),
+            allow_multiple: false,
         }
     }
 }

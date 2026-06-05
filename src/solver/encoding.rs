@@ -264,6 +264,10 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             self.cache.provider().display_name(name_id)
         );
 
+        if package_candidates.allow_multiple {
+            self.state.allow_multiple_names.insert(name_id);
+        }
+
         // If there is a locked solvable, forbid all other candidates
         if let Some(locked_solvable_id) = package_candidates.locked {
             self.add_locked_package_clauses(locked_solvable_id, &package_candidates.candidates);
@@ -694,7 +698,11 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     /// Record `variable` as a candidate for a forbid-multiple clause under
     /// `name_id`. Returns silently if the variable has already been registered;
     /// see [`Self::forbid_seen`] for why globally-deduplicating is safe.
+    /// Also skips registration for packages that allow multiple versions.
     fn register_forbid_target(&mut self, name_id: D::NameId, variable: VariableId) {
+        if self.state.allow_multiple_names.contains(name_id) {
+            return;
+        }
         if self.forbid_seen.insert(variable) {
             self.pending_forbid_clauses
                 .entry(name_id)
