@@ -225,6 +225,11 @@ pub(crate) struct SolverState<D: DependencyProvider> {
     /// solvable for a package.
     at_least_one_tracker: <D::NameId as SolverId>::Map<Option<VariableId>>,
 
+    /// The auxiliary variable of the shared constrains encoding per version
+    /// set. The [`Clause::ConstrainsExcluded`] clauses are emitted exactly
+    /// once, when the variable is allocated.
+    constrains_aux_vars: HashMap<VersionSetId, VariableId>,
+
     pub(crate) decision_tracker: DecisionTracker,
 
     /// Activity score per package.
@@ -251,6 +256,7 @@ impl<D: DependencyProvider> Default for SolverState<D> {
             clauses_added_for_solvable: Default::default(),
             at_most_one_trackers: Default::default(),
             at_least_one_tracker: Default::default(),
+            constrains_aux_vars: Default::default(),
             decision_tracker: Default::default(),
             name_activity: Default::default(),
             #[cfg(feature = "diagnostics")]
@@ -303,7 +309,9 @@ impl PropagationVisitsByType {
     fn count<N>(&mut self, clause: &Clause<N>) {
         match clause {
             Clause::Requires(..) => self.requires += 1,
-            Clause::Constrains(..) => self.constrains += 1,
+            Clause::Constrains(..)
+            | Clause::ConstrainsExcluded(..)
+            | Clause::ConstrainsParent(..) => self.constrains += 1,
             Clause::ForbidMultipleInstances(..) => self.forbid_multiple += 1,
             Clause::Lock(..) => self.lock += 1,
             Clause::Learnt(..) => self.learnt += 1,

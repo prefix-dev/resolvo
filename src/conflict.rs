@@ -13,7 +13,7 @@ use petgraph::{
 
 use crate::{
     DenseIndex, DependencyProvider, Interner, Requirement, SolvableId, SolverId, StringId,
-    VersionSetId,
+    VariableId, VersionSetId,
     internal::{id::ClauseId, solver_id::SolvableIdOrRoot},
     runtime::AsyncRuntime,
     solver::{Solver, clause::Clause, variable_map::VariableOrigin},
@@ -55,6 +55,72 @@ impl Conflict {
         let root_node = Self::add_node(&mut graph, &mut nodes, SolvableIdOrRoot::root());
         let unresolved_node = graph.add_node(ConflictNode::UnresolvedDependency);
         let mut last_node_by_name: HashMap<D::NameId, NodeIndex> = HashMap::default();
+
+        // The shared constrains encoding splits each (parent, excluded
+        // candidate) pair over two clauses linked by an auxiliary variable.
+        // Collect both sides per auxiliary variable so the original
+        // `parent -> candidate` edges can be reconstructed in the loop below.
+        let mut constrains_aux_parents: HashMap<VariableId, Vec<SolvableIdOrRoot<D::SolvableId>>> =
+            HashMap::default();
+        let mut constrains_aux_candidates: HashMap<
+            VariableId,
+            Vec<SolvableIdOrRoot<D::SolvableId>>,
+        > = HashMap::default();
+        for clause_id in &self.clauses {
+            match state.clauses.kinds[clause_id.to_index()] {
+                Clause::ConstrainsParent(parent, aux, _) => {
+                    let parent = parent
+                        .as_solvable_or_root(&state.variable_map)
+                        .expect("constrains parents are solvables or root");
+                    constrains_aux_parents.entry(aux).or_default().push(parent);
+                }
+                Clause::ConstrainsExcluded(candidate, aux, _) => {
+                    let candidate = candidate
+                        .as_solvable_or_root(&state.variable_map)
+                        .expect("excluded candidates are solvables");
+                    constrains_aux_candidates
+                        .entry(aux)
+                        .or_default()
+                        .push(candidate);
+                }
+                _ => {}
+            }
+        }
+
+        // If only one side of a chain is part of the conflict, recover the
+        // other side from the assignment reason of the auxiliary variable.
+        let reason_clause = |aux: VariableId| {
+            state
+                .decision_tracker
+                .find_clause_for_assignment(aux)
+                .map(|clause_id| state.clauses.kinds[clause_id.to_index()])
+        };
+        for &aux in constrains_aux_parents.keys() {
+            if constrains_aux_candidates.contains_key(&aux) {
+                continue;
+            }
+            if let Some(Clause::ConstrainsExcluded(candidate, _, _)) = reason_clause(aux) {
+                let candidate = candidate
+                    .as_solvable_or_root(&state.variable_map)
+                    .expect("excluded candidates are solvables");
+                constrains_aux_candidates.insert(aux, vec![candidate]);
+            }
+        }
+        for &aux in constrains_aux_candidates.keys() {
+            if constrains_aux_parents.contains_key(&aux) {
+                continue;
+            }
+            if let Some(Clause::ConstrainsParent(parent, _, _)) = reason_clause(aux) {
+                let parent = parent
+                    .as_solvable_or_root(&state.variable_map)
+                    .expect("constrains parents are solvables or root");
+                constrains_aux_parents.insert(aux, vec![parent]);
+            }
+        }
+
+        // Avoids adding the same edge once for each side of a chain.
+        type ConstrainsEdge<S> = (SolvableIdOrRoot<S>, SolvableIdOrRoot<S>, VersionSetId);
+        let mut constrains_edges: HashSet<ConstrainsEdge<D::SolvableId>> = HashSet::new();
 
         for clause_id in &self.clauses {
             let clause = &state.clauses.kinds[clause_id.to_index()];
@@ -159,6 +225,62 @@ impl Conflict {
                         dep_node,
                         ConflictEdge::Conflict(ConflictCause::Constrains(version_set_id)),
                     );
+                }
+                &Clause::ConstrainsParent(package_id, aux, version_set_id) => {
+                    let package_solvable = package_id
+                        .as_solvable_or_root(&state.variable_map)
+                        .expect("constrains parents are solvables or root");
+
+                    let Some(candidates) = constrains_aux_candidates.get(&aux) else {
+                        continue;
+                    };
+
+                    for &dependency_solvable in candidates {
+                        if !constrains_edges.insert((
+                            package_solvable,
+                            dependency_solvable,
+                            version_set_id,
+                        )) {
+                            continue;
+                        }
+
+                        let package_node = Self::add_node(&mut graph, &mut nodes, package_solvable);
+                        let dep_node = Self::add_node(&mut graph, &mut nodes, dependency_solvable);
+
+                        graph.add_edge(
+                            package_node,
+                            dep_node,
+                            ConflictEdge::Conflict(ConflictCause::Constrains(version_set_id)),
+                        );
+                    }
+                }
+                &Clause::ConstrainsExcluded(dep_id, aux, version_set_id) => {
+                    let dependency_solvable = dep_id
+                        .as_solvable_or_root(&state.variable_map)
+                        .expect("excluded candidates are solvables");
+
+                    let Some(parents) = constrains_aux_parents.get(&aux) else {
+                        continue;
+                    };
+
+                    for &package_solvable in parents {
+                        if !constrains_edges.insert((
+                            package_solvable,
+                            dependency_solvable,
+                            version_set_id,
+                        )) {
+                            continue;
+                        }
+
+                        let package_node = Self::add_node(&mut graph, &mut nodes, package_solvable);
+                        let dep_node = Self::add_node(&mut graph, &mut nodes, dependency_solvable);
+
+                        graph.add_edge(
+                            package_node,
+                            dep_node,
+                            ConflictEdge::Conflict(ConflictCause::Constrains(version_set_id)),
+                        );
+                    }
                 }
                 Clause::AnyOf(selected, _variable) => {
                     // Assumption: since `AnyOf` of clause can never be false, we dont add an edge
