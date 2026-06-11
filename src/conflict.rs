@@ -12,7 +12,7 @@ use petgraph::{
 };
 
 use crate::{
-    DenseIndex, DependencyProvider, Interner, Requirement, SolvableId, SolverId, StringId,
+    DenseIndex, DependencyProvider, Interner, NameId, Requirement, SolvableId, SolverId, StringId,
     VersionSetId,
     internal::{id::ClauseId, solver_id::SolvableIdOrRoot},
     runtime::AsyncRuntime,
@@ -213,6 +213,233 @@ impl Conflict {
         let graph = self.graph(solver);
         DisplayUnsat::new(graph, solver.provider())
     }
+
+    /// Returns structured, machine-actionable hints describing the causes of
+    /// the conflict.
+    ///
+    /// This is the data counterpart of [`Conflict::display_user_friendly`],
+    /// which renders the same causes as a human readable tree. Callers can act
+    /// on the hints programmatically, for example to suggest a correction for a
+    /// misspelled package name or to report that a package is not available for
+    /// the current platform.
+    ///
+    /// Hints reference packages, versions and version sets by their interned
+    /// ids; resolve them through the [`Interner`] of the provider.
+    pub fn hints<D: DependencyProvider, RT: AsyncRuntime>(
+        &self,
+        solver: &Solver<D, RT>,
+    ) -> Vec<ConflictHint<D::NameId, D::SolvableId>> {
+        let provider = solver.provider();
+        let conflict_graph = self.graph(solver);
+        let graph = &conflict_graph.graph;
+
+        let mut hints: Vec<ConflictHint<D::NameId, D::SolvableId>> = Vec::new();
+        let push = |hints: &mut Vec<ConflictHint<D::NameId, D::SolvableId>>, hint| {
+            if !hints.contains(&hint) {
+                hints.push(hint);
+            }
+        };
+
+        // Incompatible solvables grouped by name. Insertion order keeps the
+        // output deterministic.
+        let mut forbidden: Vec<(D::NameId, Vec<D::SolvableId>)> = Vec::new();
+
+        for edge in graph.edge_indices() {
+            let (source, target) = graph.edge_endpoints(edge).unwrap();
+            match graph[edge] {
+                ConflictEdge::Requires(requirement) => {
+                    // Requirements with no candidates reach the unresolved sink.
+                    if Some(target) != conflict_graph.unresolved_node {
+                        continue;
+                    }
+                    let required_by = match graph[source] {
+                        ConflictNode::Root => RequiredBy::Problem,
+                        ConflictNode::Solvable(solvable) => RequiredBy::Solvable(solvable),
+                        _ => continue,
+                    };
+                    for version_set in requirement.version_sets(provider) {
+                        let hint = classify_missing(solver, requirement, version_set, required_by);
+                        push(&mut hints, hint);
+                    }
+                }
+                ConflictEdge::Conflict(ConflictCause::Constrains(constraint)) => {
+                    if let ConflictNode::Solvable(constrained_by) = graph[source] {
+                        push(
+                            &mut hints,
+                            ConflictHint::Constrained {
+                                constraint,
+                                constrained_by,
+                            },
+                        );
+                    }
+                }
+                ConflictEdge::Conflict(ConflictCause::Locked(locked)) => {
+                    push(&mut hints, ConflictHint::Locked { locked });
+                }
+                ConflictEdge::Conflict(ConflictCause::ForbidMultipleInstances) => {
+                    for node in [source, target] {
+                        if let ConflictNode::Solvable(solvable) = graph[node] {
+                            let name = provider.solvable_name(solvable);
+                            match forbidden.iter_mut().find(|(n, _)| *n == name) {
+                                Some((_, solvables)) if !solvables.contains(&solvable) => {
+                                    solvables.push(solvable)
+                                }
+                                Some(_) => {}
+                                None => forbidden.push((name, vec![solvable])),
+                            }
+                        }
+                    }
+                }
+                ConflictEdge::Conflict(ConflictCause::Excluded) => {
+                    // Excluded candidate. Providers keep excluded candidates in
+                    // the candidate list, so the requirement edge points here
+                    // instead of at the unresolved sink. Report it only when
+                    // every matching candidate was excluded.
+                    let ConflictNode::Solvable(candidate) = graph[source] else {
+                        continue;
+                    };
+                    let name = provider.solvable_name(candidate);
+                    for incoming in graph.edges_directed(source, Direction::Incoming) {
+                        let ConflictEdge::Requires(requirement) = *incoming.weight() else {
+                            continue;
+                        };
+                        let required_by = match graph[incoming.source()] {
+                            ConflictNode::Root => RequiredBy::Problem,
+                            ConflictNode::Solvable(solvable) => RequiredBy::Solvable(solvable),
+                            _ => continue,
+                        };
+                        for version_set in requirement.version_sets(provider) {
+                            if provider.version_set_name(version_set) != name {
+                                continue;
+                            }
+                            if let Some(reasons) = all_candidates_excluded(solver, version_set) {
+                                push(
+                                    &mut hints,
+                                    ConflictHint::AllCandidatesExcluded {
+                                        name,
+                                        reasons,
+                                        required_by,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (name, solvables) in forbidden {
+            if solvables.len() > 1 {
+                hints.push(ConflictHint::IncompatibleRequests { name, solvables });
+            }
+        }
+
+        // Top-level request hints first, otherwise stable.
+        hints.sort_by_key(|hint| !hint.is_top_level());
+        hints
+    }
+}
+
+/// Classifies a requirement that has no installable candidates into a
+/// [`ConflictHint`], distinguishing an unknown package name from a version that
+/// does not match and from candidates that were all excluded.
+fn classify_missing<D: DependencyProvider, RT: AsyncRuntime>(
+    solver: &Solver<D, RT>,
+    requirement: Requirement,
+    version_set: VersionSetId,
+    required_by: RequiredBy<D::SolvableId>,
+) -> ConflictHint<D::NameId, D::SolvableId> {
+    let provider = solver.provider();
+    let name = provider.version_set_name(version_set);
+    let candidates = solver
+        .async_runtime
+        .block_on(solver.cache.get_or_cache_candidates(name))
+        .unwrap_or_else(|_| {
+            unreachable!("the candidates were used during solving, so they are cached")
+        });
+
+    // No solvables for this name at all: the package is unknown.
+    if candidates.candidates.is_empty() && candidates.excluded.is_empty() {
+        return ConflictHint::PackageUnavailable {
+            name,
+            requirement,
+            required_by,
+        };
+    }
+
+    // Matching candidates that were excluded outrank a plain version mismatch.
+    if !candidates.excluded.is_empty() {
+        let excluded_ids: Vec<_> = candidates.excluded.iter().map(|&(id, _)| id).collect();
+        let matching_excluded = solver.async_runtime.block_on(provider.filter_candidates(
+            &excluded_ids,
+            version_set,
+            false,
+        ));
+        if !matching_excluded.is_empty() {
+            let reasons = candidates
+                .excluded
+                .iter()
+                .filter(|(id, _)| matching_excluded.contains(id))
+                .map(|&(_, reason)| reason)
+                .unique()
+                .collect();
+            return ConflictHint::AllCandidatesExcluded {
+                name,
+                reasons,
+                required_by,
+            };
+        }
+    }
+
+    // The package exists but no version matches the requested range.
+    ConflictHint::NoMatchingVersion {
+        requirement,
+        available: candidates.candidates.clone(),
+        required_by,
+    }
+}
+
+/// Returns the exclusion reasons when every candidate matching the version set
+/// was excluded, or `None` when at least one matching candidate was not.
+fn all_candidates_excluded<D: DependencyProvider, RT: AsyncRuntime>(
+    solver: &Solver<D, RT>,
+    version_set: VersionSetId,
+) -> Option<Vec<StringId>> {
+    let provider = solver.provider();
+    let name = provider.version_set_name(version_set);
+    let candidates = solver
+        .async_runtime
+        .block_on(solver.cache.get_or_cache_candidates(name))
+        .unwrap_or_else(|_| {
+            unreachable!("the candidates were used during solving, so they are cached")
+        });
+    if candidates.excluded.is_empty() {
+        return None;
+    }
+    let matching = solver
+        .async_runtime
+        .block_on(solver.cache.get_or_cache_matching_candidates(version_set))
+        .unwrap_or_else(|_| {
+            unreachable!("the candidates were used during solving, so they are cached")
+        });
+    if matching.is_empty() {
+        return None;
+    }
+
+    let excluded: HashSet<_> = candidates.excluded.iter().map(|&(id, _)| id).collect();
+    if !matching.iter().all(|id| excluded.contains(id)) {
+        return None;
+    }
+
+    Some(
+        candidates
+            .excluded
+            .iter()
+            .filter(|(id, _)| matching.contains(id))
+            .map(|&(_, reason)| reason)
+            .unique()
+            .collect(),
+    )
 }
 
 /// A node in the graph representation of a [`Conflict`]
@@ -296,6 +523,97 @@ pub enum ConflictCause<S = SolvableId> {
     ForbidMultipleInstances,
     /// The node was excluded
     Excluded,
+}
+
+/// Identifies what introduced a requirement reported in a [`ConflictHint`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RequiredBy<S = SolvableId> {
+    /// The requirement is a top-level requirement of the [`Problem`] itself.
+    ///
+    /// [`Problem`]: crate::Problem
+    Problem,
+    /// The requirement is a dependency of the given solvable.
+    Solvable(S),
+}
+
+/// A structured, machine-actionable explanation of a single cause of an
+/// unsatisfiable solve, returned by [`Conflict::hints`].
+///
+/// All packages, versions and version sets are referenced by their interned
+/// ids. Resolve them through the [`Interner`] of the provider.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ConflictHint<N = NameId, S = SolvableId> {
+    /// A required package has no candidates at all: the name is unknown to the
+    /// provider. This commonly indicates a misspelled package name or a missing
+    /// channel.
+    PackageUnavailable {
+        /// The name of the package that could not be found.
+        name: N,
+        /// The requirement that asked for the package.
+        requirement: Requirement,
+        /// What introduced the requirement.
+        required_by: RequiredBy<S>,
+    },
+    /// The package exists but none of its versions match the requested version
+    /// range.
+    NoMatchingVersion {
+        /// The requirement that could not be satisfied.
+        requirement: Requirement,
+        /// The candidates that exist for the package, none of which match.
+        available: Vec<S>,
+        /// What introduced the requirement.
+        required_by: RequiredBy<S>,
+    },
+    /// The package has candidates matching the requested range, but all of them
+    /// were excluded, for example because they are not compatible with the
+    /// current platform.
+    AllCandidatesExcluded {
+        /// The name of the excluded package.
+        name: N,
+        /// The reasons the matching candidates were excluded.
+        reasons: Vec<StringId>,
+        /// What introduced the requirement.
+        required_by: RequiredBy<S>,
+    },
+    /// Multiple incompatible versions of the same package are required at the
+    /// same time and cannot be installed together.
+    IncompatibleRequests {
+        /// The name of the package required in incompatible versions.
+        name: N,
+        /// The conflicting candidates involved.
+        solvables: Vec<S>,
+    },
+    /// A run constraint imposed by a package cannot be fulfilled.
+    Constrained {
+        /// The version set the dependency is constrained to.
+        constraint: VersionSetId,
+        /// The solvable that imposes the constraint.
+        constrained_by: S,
+    },
+    /// A locked package conflicts with the versions required by the request.
+    Locked {
+        /// The locked solvable.
+        locked: S,
+    },
+}
+
+impl<N, S> ConflictHint<N, S> {
+    /// Whether the hint maps directly to a top-level requirement of the request.
+    fn is_top_level(&self) -> bool {
+        matches!(
+            self,
+            ConflictHint::PackageUnavailable {
+                required_by: RequiredBy::Problem,
+                ..
+            } | ConflictHint::NoMatchingVersion {
+                required_by: RequiredBy::Problem,
+                ..
+            } | ConflictHint::AllCandidatesExcluded {
+                required_by: RequiredBy::Problem,
+                ..
+            }
+        )
+    }
 }
 
 /// Represents a node that has been merged with others

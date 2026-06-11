@@ -1,4 +1,5 @@
 mod bundle_box;
+mod hints;
 
 use std::io::{Write, stderr};
 
