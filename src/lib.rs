@@ -200,6 +200,14 @@ pub struct Candidates<S = SolvableId> {
     /// consider these solvables when forming a solution but will use
     /// them in the error message if no solution could be found.
     pub excluded: Vec<(S, StringId)>,
+
+    /// When `true`, self-referential constraints (where a package conflicts
+    /// with something it also provides) are silently ignored rather than
+    /// marking the package uninstallable. Defaults to `false`.
+    ///
+    /// Some ecosystems (e.g. RPM) require this because packages routinely
+    /// provide and conflict with the same virtual capability.
+    pub allow_self_conflicts: bool,
 }
 
 impl<S> Default for Candidates<S> {
@@ -210,6 +218,7 @@ impl<S> Default for Candidates<S> {
             locked: None,
             hint_dependencies_available: HintDependenciesAvailable::None,
             excluded: Vec::new(),
+            allow_self_conflicts: false,
         }
     }
 }

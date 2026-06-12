@@ -1,6 +1,10 @@
 use std::{any::Any, collections::VecDeque, future::ready};
 
-use super::{SolverState, clause::WatchedLiterals, conditions};
+use super::{
+    SolverState,
+    clause::{Clause, WatchedLiterals},
+    conditions,
+};
 use crate::{
     Candidates, ConditionId, ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider,
     SolverCache, StringId, VariableId, VersionSetId,
@@ -264,6 +268,10 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             self.cache.provider().display_name(name_id)
         );
 
+        if package_candidates.allow_self_conflicts {
+            self.state.allow_self_conflicts_names.insert(name_id);
+        }
+
         // If there is a locked solvable, forbid all other candidates
         if let Some(locked_solvable_id) = package_candidates.locked {
             self.add_locked_package_clauses(locked_solvable_id, &package_candidates.candidates);
@@ -447,6 +455,13 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             // Pairwise encoding: one (¬parent ∨ ¬candidate) clause per
             // excluded candidate.
             for &forbidden_candidate in candidates {
+                if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
+                    let name_id = self.cache.provider().solvable_name(forbidden_candidate);
+                    if !self.state.allow_self_conflicts_names.contains(name_id) {
+                        self.add_self_conflict_clause(variable, constraint);
+                    }
+                    continue;
+                }
                 let forbidden_candidate_var =
                     self.state.variable_map.intern_solvable(forbidden_candidate);
                 let (watched_literals, conflict, kind) = WatchedLiterals::constrains(
@@ -479,6 +494,13 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     .insert(constraint, aux_variable);
 
                 for &forbidden_candidate in candidates {
+                    if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
+                        let name_id = self.cache.provider().solvable_name(forbidden_candidate);
+                        if !self.state.allow_self_conflicts_names.contains(name_id) {
+                            self.add_self_conflict_clause(variable, constraint);
+                        }
+                        continue;
+                    }
                     let forbidden_candidate_var =
                         self.state.variable_map.intern_solvable(forbidden_candidate);
                     let (watched_literals, kind) = WatchedLiterals::constrains_excluded(
@@ -567,6 +589,19 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         }
 
         variable
+    }
+
+    /// Adds a unary constrains clause that forbids a solvable that conflicts
+    /// with something it also provides (a self-conflict).
+    fn add_self_conflict_clause(&mut self, variable: VariableId, constraint: VersionSetId) {
+        let kind = Clause::Constrains(variable, variable, constraint);
+        let clause_id = self.state.add_clause(None, kind);
+
+        self.state.negative_assertions.push((variable, clause_id));
+
+        if self.state.decision_tracker.assigned_value(variable) == Some(true) {
+            self.conflicting_clauses.push(clause_id);
+        }
     }
 
     /// Enqueues retrieving the dependencies for a solvable.

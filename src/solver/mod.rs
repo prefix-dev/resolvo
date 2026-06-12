@@ -219,6 +219,7 @@ pub(crate) struct SolverState<D: DependencyProvider> {
 
     clauses_added_for_package: <D::NameId as SolverId>::Set,
     clauses_added_for_solvable: WithRootSet<D::SolvableId>,
+    pub(crate) allow_self_conflicts_names: <D::NameId as SolverId>::Set,
     at_most_one_trackers: HashMap<D::NameId, AtMostOnceTracker<VariableId>>,
 
     /// Keeps track of auxiliary variables that are used to encode at-least-one
@@ -254,6 +255,7 @@ impl<D: DependencyProvider> Default for SolverState<D> {
             disjunctions: Default::default(),
             clauses_added_for_package: Default::default(),
             clauses_added_for_solvable: Default::default(),
+            allow_self_conflicts_names: Default::default(),
             at_most_one_trackers: Default::default(),
             at_least_one_tracker: Default::default(),
             constrains_aux_vars: Default::default(),
