@@ -170,9 +170,12 @@ impl<N: SolverId> Clause<N> {
         condition: Option<(DisjunctionId, &[Literal])>,
         decision_tracker: &DecisionTracker,
     ) -> (Self, Option<[Literal; 2]>, bool) {
-        // It only makes sense to introduce a requires clause when the parent solvable
-        // is undecided or going to be installed
-        assert_ne!(decision_tracker.assigned_value(parent), Some(false));
+        // On the lazy-conditional path the parent may already have been
+        // propagated false by the time this clause is built (e.g. a deferred
+        // requirement whose condition fires after the parent was forbidden).
+        // The clause is currently satisfied by `¬parent`, but that assignment
+        // can be backtracked later, so the clause must still be added.
+        let parent_is_false = decision_tracker.assigned_value(parent) == Some(false);
 
         let kind = Clause::Requires(parent, condition.map(|d| d.0), requirement);
 
@@ -190,9 +193,8 @@ impl<N: SolverId> Clause<N> {
         let mut literals = condition_literals.chain(candidate_literals).peekable();
         let Some(&first_literal) = literals.peek() else {
             // If there are no candidates and there is no condition, then this clause is an
-            // assertion.
-            // There is also no conflict because we asserted above that the parent is not
-            // assigned to false yet.
+            // assertion. An assertion never conflicts: it either re-asserts an already
+            // false parent or will assign the parent false during propagation.
             return (kind, None, false);
         };
 
@@ -200,14 +202,16 @@ impl<N: SolverId> Clause<N> {
             // Watch any candidate that is not assigned to false
             Some(watched_candidate) => (kind, Some([parent.negative(), watched_candidate]), false),
 
-            // All candidates are assigned to false! Therefore, the clause conflicts with the
-            // current decisions. There are no valid watches for it at the moment, but we will
-            // assign default ones nevertheless, because they will become valid after the solver
-            // restarts.
-            None => {
-                // Try to find a condition that is not assigned to false.
-                (kind, Some([parent.negative(), first_literal]), true)
-            }
+            // All candidates are assigned to false! Unless the parent is false as well
+            // (which satisfies the clause), the clause conflicts with the current
+            // decisions. There are no valid watches for it at the moment, but we will
+            // assign default ones nevertheless, because they will become valid after the
+            // solver restarts.
+            None => (
+                kind,
+                Some([parent.negative(), first_literal]),
+                !parent_is_false,
+            ),
         }
     }
 
@@ -228,14 +232,19 @@ impl<N: SolverId> Clause<N> {
         via: VersionSetId,
         decision_tracker: &DecisionTracker,
     ) -> (Self, Option<[Literal; 2]>, bool) {
-        // It only makes sense to introduce a constrains clause when the parent solvable
-        // is undecided or going to be installed
-        assert_ne!(decision_tracker.assigned_value(parent), Some(false));
+        // On the lazy-conditional path the parent may already have been propagated
+        // false by the time this clause is built (e.g. a candidate of a deferred
+        // requirement whose dependencies are prefetched). The clause `¬parent v
+        // ¬forbidden` is then currently satisfied, but the assignment can be
+        // backtracked later, so the clause must still be added.
+        let parent_is_false = decision_tracker.assigned_value(parent) == Some(false);
 
         // If the forbidden solvable is already assigned to true, that means that there
         // is a conflict with current decisions, because it implies the parent
-        // solvable would be false (and we just asserted that it is not)
-        let conflict = decision_tracker.assigned_value(forbidden_solvable) == Some(true);
+        // solvable would be false, unless the parent already is false, which
+        // satisfies the clause.
+        let conflict =
+            !parent_is_false && decision_tracker.assigned_value(forbidden_solvable) == Some(true);
 
         (
             Clause::Constrains(parent, forbidden_solvable, via),
@@ -266,14 +275,17 @@ impl<N: SolverId> Clause<N> {
         via: VersionSetId,
         decision_tracker: &DecisionTracker,
     ) -> (Self, Option<[Literal; 2]>, bool) {
-        // It only makes sense to introduce a constrains clause when the parent
-        // solvable is undecided or going to be installed
-        assert_ne!(decision_tracker.assigned_value(parent), Some(false));
+        // On the lazy-conditional path the parent may already have been propagated
+        // false by the time this clause is built (e.g. a candidate of a deferred
+        // requirement whose dependencies are prefetched). The clause `¬parent v
+        // ¬aux` is then currently satisfied, but the assignment can be backtracked
+        // later, so the clause must still be added.
+        let parent_is_false = decision_tracker.assigned_value(parent) == Some(false);
 
         // If the auxiliary variable is already true, an excluded candidate is
-        // installed, which implies the parent solvable would be false (and we
-        // just asserted that it is not).
-        let conflict = decision_tracker.assigned_value(aux) == Some(true);
+        // installed, which implies the parent solvable would be false, unless
+        // the parent already is false, which satisfies the clause.
+        let conflict = !parent_is_false && decision_tracker.assigned_value(aux) == Some(true);
 
         (
             Clause::ConstrainsParent(parent, aux, via),
@@ -915,21 +927,30 @@ mod test {
             candidate1
         );
 
-        // Panic
+        // No conflict: all candidates are false, but the parent is false as
+        // well, which satisfies the clause. This can happen on the
+        // lazy-conditional path where clauses are built after the parent was
+        // propagated false. The clause must still be constructed because the
+        // parent's assignment can be backtracked later.
         decisions
             .try_add_decision(Decision::new(parent, false, ClauseId::install_root()), 1)
             .unwrap();
-        let panicked = std::panic::catch_unwind(|| {
-            WatchedLiterals::requires::<crate::NameId>(
-                parent,
-                VersionSetId::from_index(0).into(),
-                [candidate1, candidate2],
-                None,
-                &decisions,
-            )
-        })
-        .is_err();
-        assert!(panicked);
+        let (clause, conflict, _kind) = WatchedLiterals::requires::<crate::NameId>(
+            parent,
+            VersionSetId::from_index(0).into(),
+            [candidate1, candidate2],
+            None,
+            &decisions,
+        );
+        assert!(!conflict);
+        assert_eq!(
+            clause.as_ref().unwrap().watched_literals[0].variable(),
+            parent
+        );
+        assert_eq!(
+            clause.as_ref().unwrap().watched_literals[1].variable(),
+            candidate1
+        );
     }
 
     #[test]
@@ -976,20 +997,29 @@ mod test {
             forbidden
         );
 
-        // Panic
+        // No conflict: the forbidden solvable is installed, but the parent is
+        // false, which satisfies the clause. This can happen on the
+        // lazy-conditional path where clauses are built after the parent was
+        // propagated false. The clause must still be constructed because the
+        // parent's assignment can be backtracked later.
         decisions
             .try_add_decision(Decision::new(parent, false, ClauseId::install_root()), 1)
             .unwrap();
-        let panicked = std::panic::catch_unwind(|| {
-            WatchedLiterals::constrains::<crate::NameId>(
-                parent,
-                forbidden,
-                VersionSetId::from_index(0),
-                &decisions,
-            )
-        })
-        .is_err();
-        assert!(panicked);
+        let (clause, conflict, _kind) = WatchedLiterals::constrains::<crate::NameId>(
+            parent,
+            forbidden,
+            VersionSetId::from_index(0),
+            &decisions,
+        );
+        assert!(!conflict);
+        assert_eq!(
+            clause.as_ref().unwrap().watched_literals[0].variable(),
+            parent
+        );
+        assert_eq!(
+            clause.as_ref().unwrap().watched_literals[1].variable(),
+            forbidden
+        );
     }
 
     #[test]

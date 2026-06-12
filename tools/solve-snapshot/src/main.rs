@@ -37,6 +37,13 @@ struct Opts {
     #[clap(long, default_value = "0")]
     seed: u64,
 
+    /// Skip the first N problems: they are still generated (to advance the
+    /// RNG deterministically) but not solved or recorded. Combined with
+    /// `--seed S -n K+1 --skip K` this replays exactly problem K of the run
+    /// with seed S, e.g. to re-measure an outlier in isolation.
+    #[clap(long, default_value = "0")]
+    skip: usize,
+
     /// Enable tracing output (set RUST_LOG for verbosity, e.g. RUST_LOG=info)
     #[clap(long)]
     tracing: bool,
@@ -118,6 +125,10 @@ fn main() {
                 }
                 _ => unreachable!(),
             }
+        }
+
+        if i < opts.skip {
+            continue;
         }
 
         eprintln!(
