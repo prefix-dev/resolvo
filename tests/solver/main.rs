@@ -1490,3 +1490,117 @@ fn test_constrains_multiple_parents() {
     x=1
     "###);
 }
+
+/// When `allow_multiple` is set on a package's candidates, the solver
+/// permits multiple versions of that package in the solution.
+#[test]
+fn test_allow_multiple_versions() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("kernel", 1.into(), &[], &[]);
+    provider.add_package("kernel", 2.into(), &[], &[]);
+    provider.add_package("kernel", 3.into(), &[], &[]);
+    provider.set_allow_multiple("kernel");
+
+    // Request all three versions as soft requirements.
+    let k1 = provider.solvable_id("kernel", 1u32);
+    let k2 = provider.solvable_id("kernel", 2u32);
+    let k3 = provider.solvable_id("kernel", 3u32);
+    let requirements = provider.requirements(&["kernel"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new()
+        .requirements(requirements)
+        .soft_requirements(vec![k1, k2, k3]);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r"
+    kernel=1
+    kernel=2
+    kernel=3
+    ");
+}
+
+/// Without `allow_multiple`, only the highest version is selected.
+#[test]
+fn test_single_version_default() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("kernel", 1.into(), &[], &[]);
+    provider.add_package("kernel", 2.into(), &[], &[]);
+    provider.add_package("kernel", 3.into(), &[], &[]);
+
+    let requirements = provider.requirements(&["kernel"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new().requirements(requirements);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r"
+    kernel=3
+    ");
+}
+
+/// `allow_multiple` works correctly when the multiversion package is
+/// required by a transitive dependency discovered in a later solver
+/// pass (i.e. a different Encoder invocation than the one that first
+/// processed the package's candidates).
+#[test]
+fn test_allow_multiple_transitive() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("kernel", 1.into(), &[], &[]);
+    provider.add_package("kernel", 2.into(), &[], &[]);
+    provider.add_package("kernel", 3.into(), &[], &[]);
+    provider.set_allow_multiple("kernel");
+    // "app" depends on kernel and driver; driver also depends on kernel.
+    // driver's dependency on kernel will be processed in a later encoder
+    // invocation after driver is selected.
+    provider.add_package("app", 1.into(), &["kernel 2..100", "driver"], &[]);
+    provider.add_package("driver", 1.into(), &["kernel 1..100"], &[]);
+
+    let k1 = provider.solvable_id("kernel", 1u32);
+    let k2 = provider.solvable_id("kernel", 2u32);
+    let k3 = provider.solvable_id("kernel", 3u32);
+    let requirements = provider.requirements(&["app"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new()
+        .requirements(requirements)
+        .soft_requirements(vec![k1, k2, k3]);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    assert_snapshot!(result, @r"
+    app=1
+    driver=1
+    kernel=1
+    kernel=2
+    kernel=3
+    ");
+}
+
+/// `allow_multiple` packages still respect dependency constraints
+/// from other packages.
+#[test]
+fn test_allow_multiple_with_constraints() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("kernel", 1.into(), &[], &[]);
+    provider.add_package("kernel", 2.into(), &[], &[]);
+    provider.add_package("kernel", 3.into(), &[], &[]);
+    provider.set_allow_multiple("kernel");
+    // "app" depends on kernel >=2
+    provider.add_package("app", 1.into(), &["kernel 2..100"], &[]);
+
+    let k1 = provider.solvable_id("kernel", 1u32);
+    let k2 = provider.solvable_id("kernel", 2u32);
+    let k3 = provider.solvable_id("kernel", 3u32);
+    let requirements = provider.requirements(&["app"]);
+    let mut solver = Solver::new(provider);
+    let problem = Problem::new()
+        .requirements(requirements)
+        .soft_requirements(vec![k1, k2, k3]);
+    let solved = solver.solve(problem).unwrap();
+    let result = transaction_to_string(solver.provider(), &solved);
+    // All three kernel versions are installed; app's requirement is
+    // satisfied by kernel=2 and kernel=3.
+    assert_snapshot!(result, @r"
+    app=1
+    kernel=1
+    kernel=2
+    kernel=3
+    ");
+}

@@ -260,6 +260,7 @@ impl DependencyProvider for SudokuProvider {
             favored: None,
             hint_dependencies_available: HintDependenciesAvailable::All,
             excluded: Vec::new(),
+            allow_multiple: false,
         })
     }
 
