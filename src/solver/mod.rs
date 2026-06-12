@@ -9,7 +9,7 @@ use decision_tracker::DecisionTracker;
 use encoding::Encoder;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use variable_map::VariableMap;
+use variable_map::{VariableMap, VariableOrigin};
 
 use watch_map::WatchMap;
 
@@ -1540,6 +1540,27 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
 
             causes_at_current_level = causes_at_current_level.saturating_sub(1);
             if causes_at_current_level == 0 {
+                // Never let an encoding-helper variable (a shared-constrains
+                // auxiliary variable or an at-most-one helper bit) become the
+                // asserting first-UIP literal. A learnt clause that asserts
+                // over a helper bit barely prunes the search: the helper
+                // carries no package semantics, so the solver rediscovers the
+                // same underlying conflict once per sibling candidate. This
+                // shows up in practice when the shared constrains encoding
+                // (see [`Encoder::on_constraint_candidates_available`]) puts
+                // auxiliary variables on heavily shared constraints (e.g.
+                // conda's `python_abi` mutex): propagation gets rerouted
+                // through helper bits which then end up as the first UIP.
+                //
+                // Instead, keep resolving through the helper to the next UIP.
+                // This terminates because the decision at the current level is
+                // always a solvable variable.
+                if matches!(
+                    self.state.variable_map.origin(conflicting_solvable),
+                    VariableOrigin::ConstrainsViolation(_) | VariableOrigin::ForbidMultiple(_)
+                ) {
+                    continue;
+                }
                 break;
             }
         }

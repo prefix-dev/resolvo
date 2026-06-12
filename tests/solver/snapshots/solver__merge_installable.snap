@@ -1,11 +1,10 @@
 ---
-source: tests/solver.rs
+source: tests/solver/main.rs
 expression: "solve_snapshot(provider, &[\"a 0..3\", \"a 3..5\"])"
-snapshot_kind: text
 ---
 The following packages are incompatible
-├─ a >=3, <5 can be installed with any of the following options:
-│  └─ a 3
-└─ a >=0, <3 cannot be installed because there are no viable options:
-   ├─ a 2, which conflicts with the versions reported above.
-   └─ a 1, which conflicts with the versions reported above.
+├─ a >=0, <3 can be installed with any of the following options:
+│  └─ a 2
+└─ a >=3, <5 cannot be installed because there are no viable options:
+   ├─ a 4, which conflicts with the versions reported above.
+   └─ a 3, which conflicts with the versions reported above.

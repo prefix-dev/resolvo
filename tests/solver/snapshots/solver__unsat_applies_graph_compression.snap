@@ -1,13 +1,14 @@
 ---
-source: tests/solver.rs
+source: tests/solver/main.rs
 expression: error
 ---
 The following packages are incompatible
-├─ c >=101, <104 can be installed with any of the following options:
-│  └─ c 101
-└─ a * cannot be installed because there are no viable options:
-   └─ a 9 | 10 would require
-      └─ b *, which cannot be installed because there are no viable options:
-         └─ b 42 | 100 would require
-            └─ c >=0, <100, which cannot be installed because there are no viable options:
-               └─ c 99, which conflicts with the versions reported above.
+├─ a * can be installed with any of the following options:
+│  └─ a 9 | 10 would require
+│     └─ b *, which can be installed with any of the following options:
+│        └─ b 42 | 100 would require
+│           └─ c >=0, <100, which can be installed with any of the following options:
+│              └─ c 99
+└─ c >=101, <104 cannot be installed because there are no viable options:
+   ├─ c 103, which conflicts with the versions reported above.
+   └─ c 101, which conflicts with the versions reported above.
