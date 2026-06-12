@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.4...resolvo-v0.11.0) - 2026-06-12
+
+### Fixed
+
+- don't merge conflict nodes with distinct requirements ([#233](https://github.com/prefix-dev/resolvo/pull/233))
+
+### Other
+
+- replace RELEASE_PLZ_TOKEN with octo-sts ([#240](https://github.com/prefix-dev/resolvo/pull/240))
+- defer candidate loading for conditional requirements ([#237](https://github.com/prefix-dev/resolvo/pull/237))
+- incremental work queue for decide() ([#238](https://github.com/prefix-dev/resolvo/pull/238))
+- encode shared constraints with an auxiliary variable per version set ([#236](https://github.com/prefix-dev/resolvo/pull/236))
+- *(ci)* bump actions/checkout from 6.0.2 to 6.0.3 ([#235](https://github.com/prefix-dev/resolvo/pull/235))
+- Fix panic in add_pending_forbid_clauses during conflict detection ([#231](https://github.com/prefix-dev/resolvo/pull/231))
+- [**breaking**] add explicit layout of externally provided ids ([#224](https://github.com/prefix-dev/resolvo/pull/224))
+
 ## [0.10.4](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.3...resolvo-v0.10.4) - 2026-06-02
 
 ### Other
