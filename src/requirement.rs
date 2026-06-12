@@ -117,6 +117,24 @@ impl<V> RequirementMap<V> {
             Requirement::Union(id) => self.unions.insert(id, value),
         }
     }
+
+    #[inline]
+    pub fn get_mut(&mut self, key: Requirement) -> Option<&mut V> {
+        match key {
+            Requirement::Single(id) => self.singles.get_mut(id),
+            Requirement::Union(id) => self.unions.get_mut(id),
+        }
+    }
+
+    /// Returns a mutable reference to the value for `key`, inserting the
+    /// result of `default` first if the key has no entry yet.
+    #[inline]
+    pub fn get_or_insert_with(&mut self, key: Requirement, default: impl FnOnce() -> V) -> &mut V {
+        match key {
+            Requirement::Single(id) => self.singles.get_or_insert_with(id, default),
+            Requirement::Union(id) => self.unions.get_or_insert_with(id, default),
+        }
+    }
 }
 
 impl<V> std::ops::Index<Requirement> for RequirementMap<V> {

@@ -215,6 +215,9 @@ pub trait IdMap<K, V: Copy + Default> {
     /// Dense maps visit every allocated slot. Sparse maps visit only entries
     /// that were explicitly written.
     fn for_each_mut(&mut self, visit: impl FnMut(&mut V));
+
+    /// Immutable variant of [`Self::for_each_mut`].
+    fn for_each(&self, visit: impl FnMut(&V));
 }
 
 /// A set keyed by solver IDs.
@@ -255,6 +258,10 @@ impl<K: DenseIndex, V: Copy + Default> IdMap<K, V> for Vec<V> {
     fn for_each_mut(&mut self, visit: impl FnMut(&mut V)) {
         self.iter_mut().for_each(visit);
     }
+
+    fn for_each(&self, visit: impl FnMut(&V)) {
+        self.iter().for_each(visit);
+    }
 }
 
 impl<K: DenseIndex> IdSet<K> for IndexedSet<K> {
@@ -279,6 +286,10 @@ impl<K: Eq + Hash, V: Copy + Default, S: BuildHasher> IdMap<K, V> for HashMap<K,
 
     fn for_each_mut(&mut self, visit: impl FnMut(&mut V)) {
         HashMap::values_mut(self).for_each(visit);
+    }
+
+    fn for_each(&self, visit: impl FnMut(&V)) {
+        HashMap::values(self).for_each(visit);
     }
 }
 

@@ -1490,3 +1490,110 @@ fn test_constrains_multiple_parents() {
     x=1
     "###);
 }
+
+// ============================================================================
+// Decide-queue wake-up scenarios
+// ============================================================================
+// Each test targets a wake-up path of `solver::decide_queue`. In debug builds
+// every decide() call verifies the queue's bookkeeping invariants, so these
+// tests check the queue throughout the search, not just the solution.
+
+/// Satisfied-watch break and re-satisfaction: a=2 satisfies its `x 2..3`
+/// requirement with x=2, the conflict with b's `x 1..2` undoes that, and
+/// after backtracking the requires clauses must become eligible again
+/// (parent re-wake) and be satisfiable by x=1. The conflict also bumps x,
+/// promoting queued items to the hot queue.
+#[test]
+fn test_decide_queue_satisfaction_break() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("x", 1.into(), &[], &[]);
+    provider.add_package("x", 2.into(), &[], &[]);
+    provider.add_package("a", 1.into(), &["x 1..2"], &[]);
+    provider.add_package("a", 2.into(), &["x 2..3"], &[]);
+    provider.add_package("b", 1.into(), &["x 1..2"], &[]);
+
+    let requirements = provider.requirements(&["a", "b"]);
+    assert_snapshot!(solve_for_snapshot(provider, &requirements, &[]), @r###"
+    a=1
+    b=1
+    x=1
+    "###);
+}
+
+/// Backjump past a parent: mid=2 is undone by the conflict between its
+/// `leaf 2..3` requirement and root's explicit `leaf 1..2`, so mid's queued
+/// items become ineligible and mid=1's items must be woken afterwards.
+#[test]
+fn test_decide_queue_backjump_past_parent() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("leaf", 1.into(), &[], &[]);
+    provider.add_package("leaf", 2.into(), &[], &[]);
+    provider.add_package("mid", 1.into(), &["leaf 1..2"], &[]);
+    provider.add_package("mid", 2.into(), &["leaf 2..3"], &[]);
+    provider.add_package("top", 1.into(), &["mid"], &[]);
+
+    let requirements = provider.requirements(&["top", "leaf 1..2"]);
+    assert_snapshot!(solve_for_snapshot(provider, &requirements, &[]), @r###"
+    leaf=1
+    mid=1
+    top=1
+    "###);
+}
+
+/// Condition wake-up in both polarities: the condition on `baz; if bar 2..3`
+/// completes and breaks as bar flips between 2 and 1 during the conflict
+/// with qux's `bar 1..2` requirement.
+#[test]
+fn test_decide_queue_condition_toggles() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("bar", 1.into(), &[], &[]);
+    provider.add_package("bar", 2.into(), &[], &[]);
+    provider.add_package("baz", 1.into(), &[], &[]);
+    provider.add_package("foo", 1.into(), &["baz; if bar 2..3"], &[]);
+    provider.add_package("qux", 1.into(), &["bar 1..2"], &[]);
+
+    let requirements = provider.requirements(&["foo", "bar", "qux"]);
+    assert_snapshot!(solve_for_snapshot(provider, &requirements, &[]), @r###"
+    bar=1
+    foo=1
+    qux=1
+    "###);
+}
+
+/// Mid-solve reset: b=2's constraint on a is encoded only after a=1 is
+/// already installed, which reports a conflicting clause, resets the search
+/// to level 0 (clearing the decision tracker), and restarts. The queue's
+/// trail mirror must survive the reset.
+#[test]
+fn test_decide_queue_reset_on_late_conflict() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("a", 1.into(), &[], &[]);
+    provider.add_package("b", 1.into(), &[], &[]);
+    provider.add_package("b", 2.into(), &[], &["a 2..3"]);
+
+    let requirements = provider.requirements(&["a", "b"]);
+    assert_snapshot!(solve_for_snapshot(provider, &requirements, &[]), @r###"
+    a=1
+    b=1
+    "###);
+}
+
+/// Union requirement naming the same package in several version sets: the
+/// queue's name occurrence lists deduplicate the item registration.
+#[test]
+fn test_decide_queue_union_duplicate_name() {
+    let mut provider = BundleBoxProvider::new();
+    provider.add_package("x", 1.into(), &[], &[]);
+    provider.add_package("x", 3.into(), &[], &[]);
+    provider.add_package("a", 1.into(), &["x 0..2 | x 3..4"], &[]);
+    provider.add_package("b", 1.into(), &["x 0..2"], &[]);
+
+    let requirements = provider.requirements(&["a", "b"]);
+    assert_snapshot!(solve_for_snapshot(provider, &requirements, &[]), @r###"
+    a=1
+    b=1
+    x=1
+    "###);
+}
+
+mod decide_queue_prop;

@@ -404,11 +404,17 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             );
             let clause_id = self.state.add_clause(watched_literals, kind);
 
-            self.state
-                .requires_clauses
-                .entry(variable)
-                .or_default()
-                .push((requirement.requirement, condition, clause_id));
+            let names = requirement
+                .requirement
+                .version_sets(self.cache.provider())
+                .map(|version_set| self.cache.provider().version_set_name(version_set));
+            self.state.add_requires_clause(
+                variable,
+                requirement.requirement,
+                condition,
+                clause_id,
+                names,
+            );
 
             if conflict {
                 self.conflicting_clauses.push(clause_id);

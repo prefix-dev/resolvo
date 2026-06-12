@@ -76,6 +76,25 @@ impl<TId: DenseIndex, TValue> Mapping<TId, TValue> {
         previous_value
     }
 
+    /// Returns a mutable reference to the value for `id`, inserting the
+    /// result of `default` first if the slot is empty. Performs the chunk
+    /// addressing only once, unlike a `get`/`insert`/`get_mut` sequence.
+    pub fn get_or_insert_with(&mut self, id: TId, default: impl FnOnce() -> TValue) -> &mut TValue {
+        let idx = id.to_index();
+        let (chunk, offset) = Self::chunk_and_offset(idx);
+        if chunk >= self.chunks.len() {
+            self.chunks
+                .resize_with(chunk + 1, || std::array::from_fn(|_| None));
+        }
+        let slot = &mut self.chunks[chunk][offset];
+        if slot.is_none() {
+            *slot = Some(default());
+            self.len += 1;
+            self.max = self.max.max(idx);
+        }
+        slot.as_mut().expect("slot was just filled")
+    }
+
     /// Unset a specific value in the mapping, returns the previous value.
     pub fn unset(&mut self, id: TId) -> Option<TValue> {
         let idx = id.to_index();
