@@ -1,11 +1,14 @@
-use std::{any::Any, collections::VecDeque, future::ready};
+use std::{any::Any, collections::VecDeque};
 
 use super::{SolverState, clause::WatchedLiterals, conditions};
 use crate::{
     Candidates, ConditionId, ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider,
     SolverCache, StringId, VariableId, VersionSetId,
     internal::{id::ClauseId, solver_id::SolvableIdOrRoot},
-    solver::{conditions::Disjunction, decision::Decision},
+    solver::{
+        conditions::{DeferredConjunct, DeferredRequirement, Disjunction},
+        decision::Decision,
+    },
     solver_id::{IdMap, IdSet},
     utils::IndexedSet,
 };
@@ -65,6 +68,10 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
 enum TaskResult<'a, D: DependencyProvider> {
     Dependencies(DependenciesAvailable<'a, D::SolvableId>),
     Candidates(CandidatesAvailable<'a, D>),
+    /// The condition data for a conditional requirement is available. The
+    /// encoder uses this to decide whether to load the requirement's
+    /// candidates eagerly or defer them until the condition fires.
+    ConditionData(ConditionDataAvailable<'a, D::SolvableId>),
     RequirementCandidates(RequirementCandidatesAvailable<'a, D>),
     ConstraintCandidates(ConstraintCandidatesAvailable<'a, D::SolvableId>),
 }
@@ -81,11 +88,42 @@ struct CandidatesAvailable<'a, D: DependencyProvider> {
     package_candidates: &'a Candidates<D::SolvableId>,
 }
 
+/// Result of querying the condition data for a conditional requirement. The
+/// data is split per disjunct of the condition's DNF; each disjunct carries
+/// both the matching candidates (for the fire check) and the complement
+/// candidates (for the requires-clause literals).
+struct ConditionDataAvailable<'a, S> {
+    solvable_id: SolvableIdOrRoot<S>,
+    requirement: ConditionalRequirement,
+    condition: ConditionId,
+    disjuncts: Vec<DisjunctData<'a, S>>,
+}
+
+/// One disjunct of a condition's DNF resolved against the cache: each conjunct
+/// VS has its matching candidates (used to decide if the disjunct currently
+/// holds) and its complement representation (used to build the requires
+/// clause).
+struct DisjunctData<'a, S> {
+    conjuncts: Vec<ConjunctData<'a, S>>,
+}
+
+struct ConjunctData<'a, S> {
+    /// Candidates of the package matching the conjunct's version set. Used
+    /// for the fire check; the version set itself is carried inside the
+    /// complement form below for the encoding step.
+    matching: &'a [S],
+    /// The complement form used for the requires-clause literals.
+    complement: DisjunctionComplement<'a, S>,
+}
+
 /// Result of querying candidates for a particular requirement.
 struct RequirementCandidatesAvailable<'a, D: DependencyProvider> {
     solvable_id: SolvableIdOrRoot<D::SolvableId>,
     requirement: ConditionalRequirement,
     candidates: Vec<&'a [D::SolvableId]>,
+    /// The condition data for this requirement, already filtered to the
+    /// disjuncts that should be encoded right now. For an unconditional
+    /// requirement this is `None`.
     condition: RequirementCondition<'a, D::SolvableId>,
 }
 
@@ -154,12 +192,29 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
     /// Encode rules and variables for the given solvables.
     pub async fn encode(
+        self,
+        solvable_ids: impl IntoIterator<Item = SolvableIdOrRoot<D::SolvableId>>,
+    ) -> Result<Vec<ClauseId>, Box<dyn Any>> {
+        self.encode_with_deferred(solvable_ids, Vec::new()).await
+    }
+
+    /// Encode rules and variables for the given solvables, additionally
+    /// processing deferred conditional requirements whose condition just
+    /// fired. Each deferred entry is encoded into a single requires clause,
+    /// fetching its requirement candidates lazily.
+    pub async fn encode_with_deferred(
         mut self,
         solvable_ids: impl IntoIterator<Item = SolvableIdOrRoot<D::SolvableId>>,
+        deferred: Vec<DeferredRequirement<D::SolvableId>>,
     ) -> Result<Vec<ClauseId>, Box<dyn Any>> {
         // Queue the initial solvables for processing.
         for solvable_id in solvable_ids {
             self.queue_solvable(solvable_id);
+        }
+
+        // Queue deferred requirements that just had their condition fire.
+        for entry in deferred {
+            self.queue_deferred_requirement(entry);
         }
 
         // Process pending work until none remains. Immediately completed
@@ -189,6 +244,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         match result {
             TaskResult::Dependencies(dependencies) => self.on_dependencies_available(dependencies),
             TaskResult::Candidates(candidates) => self.on_candidates_available(candidates),
+            TaskResult::ConditionData(data) => self.on_condition_data_available(data),
             TaskResult::RequirementCandidates(candidates) => {
                 self.on_requirement_candidates_available(candidates)
             }
@@ -228,10 +284,15 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             }
         };
 
-        // Iterate over all requirements and find out to which packages they
-        // refer. Make sure we have all candidates for a particular package.
+        // Make sure we have all candidates for each package referenced by
+        // unconditional requirements and by constraints. Packages reachable
+        // *only* through a conditional requirement are not enqueued here;
+        // their candidates are loaded lazily in the deferred path once the
+        // condition fires (see [`Self::on_condition_data_available`] and
+        // [`Self::queue_deferred_requirement`]).
         for version_set_id in requirements
             .iter()
+            .filter(|requirement| requirement.condition.is_none())
             .flat_map(|requirement| requirement.requirement.version_sets(self.cache.provider()))
             .chain(constraints.iter().copied())
         {
@@ -295,6 +356,13 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         );
 
         let variable = self.state.variable_map.intern_solvable_or_root(solvable_id);
+
+        // Note: on the lazy-conditional path the parent may already have been
+        // propagated false (e.g. a deferred requirement whose condition fires
+        // after the parent was forbidden). The clause is still encoded: the
+        // parent's assignment can be backtracked later, and since neither the
+        // drained deferred entry nor `clauses_added_for_solvable` is revisited,
+        // skipping the clause here would lose it permanently.
 
         // Get the variables associated with the individual candidates.
         let version_set_variables = candidates
@@ -618,12 +686,37 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         });
     }
 
-    /// Enqueues retrieving the candidates for a particular requirement. These
-    /// candidates are already filtered and sorted.
+    /// Enqueues retrieving the candidates for a particular requirement.
+    ///
+    /// For an unconditional requirement this fetches the requirement
+    /// candidates eagerly. For a conditional requirement the condition data is
+    /// fetched first; the requirement candidates are only fetched once the
+    /// encoder confirms (in [`Self::on_condition_data_available`]) that at
+    /// least one disjunct of the condition currently holds. Disjuncts that do
+    /// not yet hold are stored in
+    /// [`crate::solver::SolverState::deferred_requirements`] and encoded later
+    /// when their condition fires.
     fn queue_conditional_requirement(
         &mut self,
         solvable_id: SolvableIdOrRoot<D::SolvableId>,
         requirement: ConditionalRequirement,
+    ) {
+        match requirement.condition {
+            None => self.queue_requirement_candidates(solvable_id, requirement, None),
+            Some(condition) => self.queue_condition_data(solvable_id, requirement, condition),
+        }
+    }
+
+    /// Enqueues fetching the requirement candidates for a (possibly
+    /// pre-filtered) conditional requirement and producing a
+    /// [`TaskResult::RequirementCandidates`] task result. If `condition_data`
+    /// is `Some` the requires clauses are encoded for the provided disjuncts
+    /// only.
+    fn queue_requirement_candidates(
+        &mut self,
+        solvable_id: SolvableIdOrRoot<D::SolvableId>,
+        requirement: ConditionalRequirement,
+        condition_data: RequirementCondition<'cache, D::SolvableId>,
     ) {
         let cache = self.cache;
         self.queue_future(async move {
@@ -634,42 +727,201 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     .map(|version_set| {
                         cache.get_or_cache_sorted_candidates_for_version_set(version_set)
                     }),
-            );
-
-            let condition_candidates = match requirement.condition {
-                Some(condition) => futures::future::try_join_all(
-                    conditions::convert_conditions_to_dnf(condition, cache.provider())
-                        .into_iter()
-                        .map(|cnf| {
-                            futures::future::try_join_all(cnf.into_iter().map(|version_set| {
-                                cache
-                                    .get_or_cache_non_matching_candidates(version_set)
-                                    .map_ok(move |matching_candidates| {
-                                        if matching_candidates.is_empty() {
-                                            DisjunctionComplement::Empty(version_set)
-                                        } else {
-                                            DisjunctionComplement::Solvables(
-                                                version_set,
-                                                matching_candidates,
-                                            )
-                                        }
-                                    })
-                            }))
-                        }),
-                )
-                .map_ok(move |dnf| Some((condition, dnf)))
-                .left_future(),
-                None => ready(Ok(None)).right_future(),
-            };
-
-            let (candidates, condition) = futures::try_join!(candidates, condition_candidates)?;
+            )
+            .await?;
 
             Ok(TaskResult::RequirementCandidates(
                 RequirementCandidatesAvailable {
                     solvable_id,
                     requirement,
                     candidates,
+                    condition: condition_data,
+                },
+            ))
+        });
+    }
+
+    /// Enqueues fetching the condition data (matching + complement candidates
+    /// per disjunct conjunct VS) for a conditional requirement. The fetch
+    /// targets only the *condition*'s packages; the requirement's candidates
+    /// are not fetched at this point, which is the entire purpose of the lazy
+    /// path.
+    fn queue_condition_data(
+        &mut self,
+        solvable_id: SolvableIdOrRoot<D::SolvableId>,
+        requirement: ConditionalRequirement,
+        condition: ConditionId,
+    ) {
+        let cache = self.cache;
+        self.queue_future(async move {
+            let dnf = conditions::convert_conditions_to_dnf(condition, cache.provider());
+            let disjuncts = futures::future::try_join_all(dnf.into_iter().map(|cnf| {
+                futures::future::try_join_all(cnf.into_iter().map(|version_set| async move {
+                    let (matching, non_matching) = futures::try_join!(
+                        cache.get_or_cache_matching_candidates(version_set),
+                        cache.get_or_cache_non_matching_candidates(version_set),
+                    )?;
+                    let complement = if non_matching.is_empty() {
+                        DisjunctionComplement::Empty(version_set)
+                    } else {
+                        DisjunctionComplement::Solvables(version_set, non_matching)
+                    };
+                    Ok::<_, Box<dyn Any>>(ConjunctData {
+                        matching,
+                        complement,
+                    })
+                }))
+                .map_ok(|conjuncts| DisjunctData { conjuncts })
+            }))
+            .await?;
+
+            Ok(TaskResult::ConditionData(ConditionDataAvailable {
+                solvable_id,
+                requirement,
+                condition,
+                disjuncts,
+            }))
+        });
+    }
+
+    /// Called when the condition data for a conditional requirement has been
+    /// resolved. Decides which disjuncts of the condition currently hold; for
+    /// each holding disjunct the encoder will fetch the requirement
+    /// candidates and emit the requires clause eagerly, and for each
+    /// non-holding disjunct an entry is pushed onto
+    /// [`crate::solver::SolverState::deferred_requirements`].
+    fn on_condition_data_available(
+        &mut self,
+        ConditionDataAvailable {
+            solvable_id,
+            requirement,
+            condition,
+            disjuncts,
+        }: ConditionDataAvailable<'cache, D::SolvableId>,
+    ) {
+        tracing::trace!(
+            "condition data available for {} (condition: {:?})",
+            requirement.requirement.display(self.cache.provider()),
+            condition,
+        );
+
+        // Partition disjuncts into "firing now" (encode eagerly) and "deferred"
+        // (push onto the deferred map).
+        let mut fired: Vec<Vec<DisjunctionComplement<'cache, D::SolvableId>>> = Vec::new();
+        let mut deferred_entries: Vec<DeferredRequirement<D::SolvableId>> = Vec::new();
+        for disjunct in disjuncts {
+            let holds = disjunct.conjuncts.iter().all(|conjunct| {
+                conjunct
+                    .matching
+                    .iter()
+                    .any(|&s| self.state.is_positively_decided(s))
+            });
+
+            if holds {
+                fired.push(
+                    disjunct
+                        .conjuncts
+                        .into_iter()
+                        .map(|c| c.complement)
+                        .collect(),
+                );
+            } else {
+                let deferred_disjunct = disjunct
+                    .conjuncts
+                    .iter()
+                    .map(|conjunct| match conjunct.complement {
+                        DisjunctionComplement::Solvables(version_set, _) => {
+                            DeferredConjunct::Solvables {
+                                version_set,
+                                matching: conjunct.matching.to_vec(),
+                            }
+                        }
+                        DisjunctionComplement::Empty(version_set) => DeferredConjunct::Empty {
+                            version_set,
+                            all_candidates: conjunct.matching.to_vec(),
+                        },
+                    })
+                    .collect();
+                deferred_entries.push(DeferredRequirement {
+                    solvable_id,
+                    requirement,
                     condition,
+                    disjunct: deferred_disjunct,
+                });
+            }
+        }
+
+        for entry in deferred_entries {
+            self.state.push_deferred(entry);
+        }
+
+        if !fired.is_empty() {
+            // The requirement is now being encoded; make sure its referenced
+            // packages have their candidates available so that locked /
+            // excluded clauses are emitted as on the eager path.
+            for version_set in requirement.requirement.version_sets(self.cache.provider()) {
+                let package_name = self.cache.provider().version_set_name(version_set);
+                self.queue_package(package_name);
+            }
+            self.queue_requirement_candidates(solvable_id, requirement, Some((condition, fired)));
+        }
+    }
+
+    /// Enqueues the future that fetches requirement candidates for a deferred
+    /// requirement and emits a single requires clause for the disjunct that
+    /// just fired. Used during the solver loop's drain step.
+    fn queue_deferred_requirement(&mut self, deferred: DeferredRequirement<D::SolvableId>) {
+        let DeferredRequirement {
+            solvable_id,
+            requirement,
+            condition,
+            disjunct,
+        } = deferred;
+        let cache = self.cache;
+
+        // The requirement is now being encoded; make sure its referenced
+        // packages have their candidates available so that locked / excluded
+        // clauses are emitted as on the eager path.
+        for version_set in requirement.requirement.version_sets(cache.provider()) {
+            let package_name = cache.provider().version_set_name(version_set);
+            self.queue_package(package_name);
+        }
+
+        self.queue_future(async move {
+            // Re-fetch the complement candidates for each conjunct of the
+            // disjunct. These are cache hits because they were fetched when
+            // the requirement was first deferred.
+            let condition_data =
+                futures::future::try_join_all(disjunct.into_iter().map(|conjunct| async move {
+                    let version_set = conjunct.version_set();
+                    let non_matching = cache
+                        .get_or_cache_non_matching_candidates(version_set)
+                        .await?;
+                    let complement = if non_matching.is_empty() {
+                        DisjunctionComplement::Empty(version_set)
+                    } else {
+                        DisjunctionComplement::Solvables(version_set, non_matching)
+                    };
+                    Ok::<_, Box<dyn Any>>(complement)
+                }))
+                .await?;
+
+            let candidates = futures::future::try_join_all(
+                requirement
+                    .requirement
+                    .version_sets(cache.provider())
+                    .map(|version_set| {
+                        cache.get_or_cache_sorted_candidates_for_version_set(version_set)
+                    }),
+            )
+            .await?;
+
+            Ok(TaskResult::RequirementCandidates(
+                RequirementCandidatesAvailable {
+                    solvable_id,
+                    requirement,
+                    candidates,
+                    condition: Some((condition, vec![condition_data])),
                 },
             ))
         });

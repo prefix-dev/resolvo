@@ -82,6 +82,13 @@ impl<N: SolverId, S: SolverId> VariableMap<N, S> {
         variable_id
     }
 
+    /// Looks up the variable for a solvable without allocating one. Returns
+    /// `None` if no variable has been allocated for this solvable yet, which
+    /// implies the solvable has not been decided.
+    pub fn lookup_solvable(&self, solvable_id: S) -> Option<VariableId> {
+        self.solvable_to_variable.get(solvable_id)
+    }
+
     #[cfg(feature = "diagnostics")]
     pub fn count(&self) -> usize {
         self.origins.len()

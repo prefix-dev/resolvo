@@ -3,18 +3,19 @@ use std::{any::Any, fmt::Display};
 use ahash::{HashMap, HashSet};
 pub use cache::SolverCache;
 use clause::{Clause, Literal, WatchedLiterals};
-use conditions::{Disjunction, DisjunctionId};
+use conditions::{DeferredRequirement, Disjunction, DisjunctionId, condition_disjunct_holds};
 use decision::Decision;
 use decision_tracker::DecisionTracker;
 use encoding::Encoder;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use variable_map::VariableMap;
 
 use watch_map::WatchMap;
 
 use crate::{
-    ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider, KnownDependencies,
-    Requirement, SolvableId, VariableId, VersionSetId,
+    ConditionId, ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider,
+    KnownDependencies, Requirement, SolvableId, VariableId, VersionSetId,
     conflict::Conflict,
     internal::{
         arena::Arena,
@@ -241,6 +242,20 @@ pub(crate) struct SolverState<D: DependencyProvider> {
     /// for the next decision. See [`decide_queue`].
     decide_queue: decide_queue::DecideQueue<D>,
 
+    /// Conditional requirements whose condition did not hold at the moment the
+    /// encoder reached them, and whose requirement candidates have therefore
+    /// not been fetched. Keyed by `ConditionId`; each entry is a list of
+    /// per-disjunct deferred requirements that share that condition.
+    ///
+    /// Invariant: an entry remains in this map only as long as the
+    /// corresponding requires clause has *not* been encoded. The first time a
+    /// deferred entry's disjunct fires the entry is drained and the encoder
+    /// builds its requires clause exactly as the eager path would have. Once
+    /// encoded the entry is removed; condition firings later in the solve
+    /// (after backtracking or otherwise) do not re-encode it.
+    deferred_requirements:
+        IndexMap<ConditionId, Vec<DeferredRequirement<D::SolvableId>>, ahash::RandomState>,
+
     #[cfg(feature = "diagnostics")]
     propagation_counters: PropagationCounters,
 }
@@ -266,6 +281,7 @@ impl<D: DependencyProvider> Default for SolverState<D> {
             name_activity: Default::default(),
             max_activity: 0.0,
             decide_queue: Default::default(),
+            deferred_requirements: Default::default(),
             #[cfg(feature = "diagnostics")]
             propagation_counters: Default::default(),
         }
@@ -396,6 +412,13 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
     /// Returns the number of clauses in the solver after solving.
     pub fn clause_count(&self) -> usize {
         self.state.clauses.kinds.len()
+    }
+
+    /// Total number of deferred per-disjunct conditional requirements still
+    /// waiting for their condition to fire. Useful to verify the "remove on
+    /// first fire" invariant of the lazy-conditional-candidates path.
+    pub fn deferred_requirements_count(&self) -> usize {
+        self.state.deferred_requirements_count()
     }
 
     /// Set the runtime of the solver to `runtime`.
@@ -678,30 +701,45 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     .map(|d| (d.variable, d.derived_from)),
             );
 
-            if new_solvables.is_empty() {
-                // If no new literals were selected this solution is complete and we can return.
+            // Also detect deferred conditional requirements whose condition
+            // has just started to hold. These have to be encoded before we can
+            // conclude the solution is complete.
+            let fired_conditions = self.state.fired_deferred_conditions();
+
+            if new_solvables.is_empty() && fired_conditions.is_empty() {
+                // If no new literals were selected and no deferred conditions
+                // fired, this solution is complete and we can return.
                 tracing::trace!(
-                    "Level {}: No new solvables selected, solution is complete",
+                    "Level {}: No new solvables or fired conditions, solution is complete",
                     level
                 );
                 return Ok(true);
             }
 
-            tracing::debug!("==== Found newly selected solvables");
-            tracing::debug!(
-                " - {}",
-                new_solvables
-                    .iter()
-                    .copied()
-                    .format_with("\n- ", |(id, derived_from), f| f(&format_args!(
-                        "{} (derived from {})",
-                        id.display(&self.state.variable_map, self.provider()),
-                        self.state.clauses.kinds[derived_from.to_index()]
-                            .display(&self.state.variable_map, self.provider()),
-                    )))
-                    .to_string()
-            );
-            tracing::debug!("====");
+            if !new_solvables.is_empty() {
+                tracing::debug!("==== Found newly selected solvables");
+                tracing::debug!(
+                    " - {}",
+                    new_solvables
+                        .iter()
+                        .copied()
+                        .format_with("\n- ", |(id, derived_from), f| f(&format_args!(
+                            "{} (derived from {})",
+                            id.display(&self.state.variable_map, self.provider()),
+                            self.state.clauses.kinds[derived_from.to_index()]
+                                .display(&self.state.variable_map, self.provider()),
+                        )))
+                        .to_string()
+                );
+                tracing::debug!("====");
+            }
+
+            if !fired_conditions.is_empty() {
+                tracing::debug!(
+                    "==== Found {} deferred condition(s) that just fired",
+                    fired_conditions.len()
+                );
+            }
 
             solvable_ids.clear();
             solvable_ids.extend(new_solvables.iter().filter_map(|(variable, _)| {
@@ -712,11 +750,17 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     .map(SolvableIdOrRoot::from)
             }));
 
+            // Drain the fired deferred requirements.
+            let mut deferred_to_encode = Vec::new();
+            for condition in fired_conditions {
+                deferred_to_encode.extend(self.state.drain_fired_deferred(condition));
+            }
+
             #[cfg(feature = "diagnostics")]
             let encoding_start = std::time::Instant::now();
             let conflicting_clauses = self.async_runtime.block_on(
                 Encoder::new(&mut self.state, &self.cache, root_deps, level)
-                    .encode(solvable_ids.iter().copied()),
+                    .encode_with_deferred(solvable_ids.iter().copied(), deferred_to_encode),
             )?;
             #[cfg(feature = "diagnostics")]
             {
@@ -1609,5 +1653,97 @@ impl<D: DependencyProvider> SolverState<D> {
                 None
             }
         })
+    }
+
+    /// Returns true if `solvable_id` has been assigned the value `true` in the
+    /// current decision state. A solvable that has never been interned as a
+    /// variable is treated as not decided.
+    pub(crate) fn is_positively_decided(&self, solvable_id: D::SolvableId) -> bool {
+        match self.variable_map.lookup_solvable(solvable_id) {
+            Some(variable) => self.decision_tracker.assigned_value(variable) == Some(true),
+            None => false,
+        }
+    }
+
+    /// Returns the `ConditionId`s of deferred requirements whose gating
+    /// disjunct currently holds. Entries are reported in insertion order so
+    /// that drain order is deterministic.
+    pub(crate) fn fired_deferred_conditions(&self) -> Vec<ConditionId> {
+        self.deferred_requirements
+            .iter()
+            .filter(|(_, entries)| {
+                entries.iter().any(|entry| {
+                    condition_disjunct_holds(&entry.disjunct, |s| self.is_positively_decided(s))
+                })
+            })
+            .map(|(condition, _)| *condition)
+            .collect()
+    }
+
+    /// Drain deferred requirements for `condition` whose disjunct currently
+    /// holds. Removed entries are returned. If, after draining, no entries
+    /// remain for `condition`, the key is removed from the map entirely.
+    pub(crate) fn drain_fired_deferred(
+        &mut self,
+        condition: ConditionId,
+    ) -> Vec<DeferredRequirement<D::SolvableId>> {
+        // Decide first which indices fire while only holding immutable
+        // borrows of the state, then mutate the deferred map. The two-pass
+        // structure avoids overlapping mutable and immutable borrows of
+        // `self`.
+        let fire_mask: Vec<bool> = match self.deferred_requirements.get(&condition) {
+            Some(entries) => entries
+                .iter()
+                .map(|entry| {
+                    condition_disjunct_holds(&entry.disjunct, |s| self.is_positively_decided(s))
+                })
+                .collect(),
+            None => return Vec::new(),
+        };
+
+        let entries = self
+            .deferred_requirements
+            .get_mut(&condition)
+            .expect("entries existed in the immutable phase");
+        let mut fired = Vec::new();
+        // Use `remove` instead of `swap_remove`: it preserves the relative
+        // order of the entries that stay in the deferred map, so that any
+        // subsequent drain visits them in the same order regardless of how
+        // many drains have happened before. Walk indices in reverse so each
+        // `remove` does not shift the indices we still need to inspect.
+        for (i, _) in fire_mask
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|&(_, &did_fire)| did_fire)
+        {
+            fired.push(entries.remove(i));
+        }
+
+        if entries.is_empty() {
+            self.deferred_requirements.swap_remove(&condition);
+        }
+
+        // We pushed in reverse order; restore insertion order for determinism.
+        fired.reverse();
+        fired
+    }
+
+    /// Register a new deferred requirement. Used by the encoder when it
+    /// detects that a conditional requirement's disjunct does not yet hold.
+    pub(crate) fn push_deferred(&mut self, entry: DeferredRequirement<D::SolvableId>) {
+        self.deferred_requirements
+            .entry(entry.condition)
+            .or_default()
+            .push(entry);
+    }
+
+    /// Total number of deferred per-disjunct entries still waiting for their
+    /// condition to fire.
+    pub(crate) fn deferred_requirements_count(&self) -> usize {
+        self.deferred_requirements
+            .values()
+            .map(|entries| entries.len())
+            .sum()
     }
 }

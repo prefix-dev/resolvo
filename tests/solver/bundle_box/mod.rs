@@ -40,8 +40,8 @@ use itertools::Itertools;
 pub use pack::Pack;
 use resolvo::{
     Candidates, Condition, ConditionId, ConditionalRequirement, Dependencies, DependencyProvider,
-    Interner, KnownDependencies, NameId, SolvableId, SolverCache, StringId, VersionSetId,
-    VersionSetUnionId, snapshot::DependencySnapshot, utils::Pool,
+    HintDependenciesAvailable, Interner, KnownDependencies, NameId, SolvableId, SolverCache,
+    StringId, VersionSetId, VersionSetUnionId, snapshot::DependencySnapshot, utils::Pool,
 };
 pub use spec::Spec;
 use version_ranges::Ranges;
@@ -61,6 +61,11 @@ pub struct BundleBoxProvider {
     concurrent_requests: Arc<AtomicUsize>,
     pub concurrent_requests_max: Rc<Cell<usize>>,
     pub sleep_before_return: bool,
+    /// When set, candidates are returned with
+    /// [`HintDependenciesAvailable::All`], which makes the solver prefetch
+    /// (and encode) the dependencies of requirement candidates as soon as the
+    /// requirement itself is encoded.
+    pub hint_dependencies_available: bool,
 
     // A mapping of packages that we have requested candidates for. This way we can keep track of
     // duplicate requests.
@@ -233,6 +238,17 @@ impl BundleBoxProvider {
     pub fn solvable_id(&self, name: impl Into<String>, version: impl Into<Pack>) -> SolvableId {
         self.intern_solvable(self.pool.intern_package_name(name.into()), version.into())
     }
+
+    /// Returns the package names for which the solver has issued a
+    /// `get_candidates` request. Used by tests that verify lazy candidate
+    /// loading does not fetch unreachable packages.
+    pub fn requested_package_names(&self) -> Vec<String> {
+        self.requested_candidates
+            .borrow()
+            .iter()
+            .map(|id| self.pool.resolve_package_name(*id).to_string())
+            .collect()
+    }
 }
 
 impl Interner for BundleBoxProvider {
@@ -343,6 +359,11 @@ impl DependencyProvider for BundleBoxProvider {
 
         let mut candidates = Candidates {
             candidates: Vec::with_capacity(package.len()),
+            hint_dependencies_available: if self.hint_dependencies_available {
+                HintDependenciesAvailable::All
+            } else {
+                HintDependenciesAvailable::None
+            },
             ..Candidates::default()
         };
         let favor = self.favored.get(package_name);
