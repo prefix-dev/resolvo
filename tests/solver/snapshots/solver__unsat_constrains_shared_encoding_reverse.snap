@@ -1,0 +1,13 @@
+---
+source: tests/solver/main.rs
+assertion_line: 1403
+expression: error
+---
+The following packages are incompatible
+├─ x * can be installed with any of the following options:
+│  └─ x 1 would require
+│     └─ b >=1, <2, which can be installed with any of the following options:
+│        └─ b 1
+└─ a * cannot be installed because there are no viable options:
+   └─ a 1 would constrain
+      └─ b >=5, <100, which conflicts with any installable versions previously reported

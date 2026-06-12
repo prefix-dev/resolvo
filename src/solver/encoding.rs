@@ -102,6 +102,12 @@ struct ConstraintCandidatesAvailable<'a, S> {
     candidates: &'a [S],
 }
 
+/// The minimum number of non-matching candidates a constraint must have before
+/// the shared auxiliary variable encoding is used (see
+/// [`Encoder::on_constraint_candidates_available`]). Below this, pairwise
+/// clauses need at most as many clauses and propagate in a single hop.
+const CONSTRAINS_AUX_ENCODING_THRESHOLD: usize = 4;
+
 impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     pub fn new(
         state: &'a mut SolverState<D>,
@@ -436,21 +442,84 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         );
 
         let variable = self.state.variable_map.intern_solvable_or_root(solvable_id);
-        for &forbidden_candidate in candidates {
-            let forbidden_candidate_var =
-                self.state.variable_map.intern_solvable(forbidden_candidate);
-            let (watched_literals, conflict, kind) = WatchedLiterals::constrains(
-                variable,
-                forbidden_candidate_var,
-                constraint,
-                &self.state.decision_tracker,
-            );
 
-            let clause_id = self.state.add_clause(watched_literals, kind);
+        if candidates.len() < CONSTRAINS_AUX_ENCODING_THRESHOLD {
+            // Pairwise encoding: one (¬parent ∨ ¬candidate) clause per
+            // excluded candidate.
+            for &forbidden_candidate in candidates {
+                let forbidden_candidate_var =
+                    self.state.variable_map.intern_solvable(forbidden_candidate);
+                let (watched_literals, conflict, kind) = WatchedLiterals::constrains(
+                    variable,
+                    forbidden_candidate_var,
+                    constraint,
+                    &self.state.decision_tracker,
+                );
 
-            if conflict {
-                self.conflicting_clauses.push(clause_id);
+                let clause_id = self.state.add_clause(watched_literals, kind);
+
+                if conflict {
+                    self.conflicting_clauses.push(clause_id);
+                }
             }
+            return;
+        }
+
+        // Shared encoding: the (¬candidate ∨ aux) clauses are emitted once per
+        // version set, each parent only adds a single (¬parent ∨ ¬aux) clause.
+        let aux_variable = match self.state.constrains_aux_vars.get(&constraint) {
+            Some(&aux_variable) => aux_variable,
+            None => {
+                let aux_variable = self
+                    .state
+                    .variable_map
+                    .alloc_constrains_violation_variable(constraint);
+                self.state
+                    .constrains_aux_vars
+                    .insert(constraint, aux_variable);
+
+                for &forbidden_candidate in candidates {
+                    let forbidden_candidate_var =
+                        self.state.variable_map.intern_solvable(forbidden_candidate);
+                    let (watched_literals, kind) = WatchedLiterals::constrains_excluded(
+                        forbidden_candidate_var,
+                        aux_variable,
+                        constraint,
+                    );
+                    let clause_id = self.state.add_clause(watched_literals, kind);
+
+                    // An already installed candidate must propagate
+                    // immediately so the parent clause below observes the
+                    // violation, just like the pairwise encoding does.
+                    if self
+                        .state
+                        .decision_tracker
+                        .assigned_value(forbidden_candidate_var)
+                        == Some(true)
+                    {
+                        self.state
+                            .decision_tracker
+                            .try_add_decision(
+                                Decision::new(aux_variable, true, clause_id),
+                                self.level,
+                            )
+                            .expect("a freshly allocated variable cannot be assigned false");
+                    }
+                }
+
+                aux_variable
+            }
+        };
+
+        let (watched_literals, conflict, kind) = WatchedLiterals::constrains_parent(
+            variable,
+            aux_variable,
+            constraint,
+            &self.state.decision_tracker,
+        );
+        let clause_id = self.state.add_clause(watched_literals, kind);
+        if conflict {
+            self.conflicting_clauses.push(clause_id);
         }
     }
 

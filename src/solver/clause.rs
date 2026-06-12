@@ -81,6 +81,30 @@ pub(crate) enum Clause<N> {
     ///
     /// In SAT terms: (¬A ∨ ¬B)
     Constrains(VariableId, VariableId, VersionSetId),
+    /// Makes the constraint's auxiliary variable turn true when a candidate
+    /// that is excluded by the constraint's version set is installed.
+    ///
+    /// Usage: constraints whose version set excludes many candidates share a
+    /// single auxiliary variable per version set. The clauses that link the
+    /// excluded candidates to the auxiliary variable are emitted once per
+    /// version set, and each (parent, version set) pair only adds a single
+    /// [`Clause::ConstrainsParent`] clause. Together these encode the same
+    /// restriction as [`Clause::Constrains`] with O(candidates + parents)
+    /// instead of O(candidates * parents) clauses.
+    ///
+    /// Only this implication direction is needed (the Plaisted-Greenbaum
+    /// one-sided form): the auxiliary variable is never decided directly, it
+    /// only receives a value through propagation.
+    ///
+    /// In SAT terms: (¬candidate ∨ aux)
+    ConstrainsExcluded(VariableId, VariableId, VersionSetId),
+    /// Forbids a parent solvable from being installed together with the
+    /// constraint's auxiliary variable, i.e. together with any candidate that
+    /// is excluded by the constraint's version set. See
+    /// [`Clause::ConstrainsExcluded`] for an overview of the encoding.
+    ///
+    /// In SAT terms: (¬parent ∨ ¬aux)
+    ConstrainsParent(VariableId, VariableId, VersionSetId),
     /// Forbids the package on the right-hand side
     ///
     /// Note that the package on the left-hand side is not part of the clause,
@@ -117,6 +141,8 @@ impl<N> Clause<N> {
         matches!(
             self,
             Clause::Constrains(..)
+                | Clause::ConstrainsExcluded(..)
+                | Clause::ConstrainsParent(..)
                 | Clause::ForbidMultipleInstances(..)
                 | Clause::Lock(..)
                 | Clause::AnyOf(..)
@@ -218,6 +244,44 @@ impl<N: SolverId> Clause<N> {
         )
     }
 
+    /// Returns the building blocks needed for a new [WatchedLiterals] of the
+    /// [Clause::ConstrainsExcluded] kind.
+    fn constrains_excluded(
+        candidate: VariableId,
+        aux: VariableId,
+        via: VersionSetId,
+    ) -> (Self, Option<[Literal; 2]>) {
+        (
+            Clause::ConstrainsExcluded(candidate, aux, via),
+            Some([candidate.negative(), aux.positive()]),
+        )
+    }
+
+    /// Returns the building blocks needed for a new [WatchedLiterals] of the
+    /// [Clause::ConstrainsParent] kind. See [`Clause::constrains`] for the
+    /// meaning of the returned values.
+    fn constrains_parent(
+        parent: VariableId,
+        aux: VariableId,
+        via: VersionSetId,
+        decision_tracker: &DecisionTracker,
+    ) -> (Self, Option<[Literal; 2]>, bool) {
+        // It only makes sense to introduce a constrains clause when the parent
+        // solvable is undecided or going to be installed
+        assert_ne!(decision_tracker.assigned_value(parent), Some(false));
+
+        // If the auxiliary variable is already true, an excluded candidate is
+        // installed, which implies the parent solvable would be false (and we
+        // just asserted that it is not).
+        let conflict = decision_tracker.assigned_value(aux) == Some(true);
+
+        (
+            Clause::ConstrainsParent(parent, aux, via),
+            Some([parent.negative(), aux.negative()]),
+            conflict,
+        )
+    }
+
     /// Returns the ids of the solvables that will be watched as well as the
     /// clause itself.
     fn forbid_multiple(
@@ -309,6 +373,12 @@ impl<N: SolverId> Clause<N> {
                     .try_fold(init, visit)
             }
             Clause::Constrains(s1, s2, _) => [s1.negative(), s2.negative()]
+                .into_iter()
+                .try_fold(init, visit),
+            Clause::ConstrainsExcluded(candidate, aux, _) => [candidate.negative(), aux.positive()]
+                .into_iter()
+                .try_fold(init, visit),
+            Clause::ConstrainsParent(parent, aux, _) => [parent.negative(), aux.negative()]
                 .into_iter()
                 .try_fold(init, visit),
             Clause::ForbidMultipleInstances(s1, s2, _) => {
@@ -429,6 +499,38 @@ impl WatchedLiterals {
             requirement,
             decision_tracker,
         );
+
+        (
+            Self::from_kind_and_initial_watches(watched_literals),
+            conflict,
+            kind,
+        )
+    }
+
+    /// Shorthand method to construct a [Clause::ConstrainsExcluded] without
+    /// requiring complicated arguments.
+    pub fn constrains_excluded<N: SolverId>(
+        candidate: VariableId,
+        aux: VariableId,
+        requirement: VersionSetId,
+    ) -> (Option<Self>, Clause<N>) {
+        let (kind, watched_literals) = Clause::constrains_excluded(candidate, aux, requirement);
+        (Self::from_kind_and_initial_watches(watched_literals), kind)
+    }
+
+    /// Shorthand method to construct a [Clause::ConstrainsParent] without
+    /// requiring complicated arguments.
+    ///
+    /// The returned boolean value is true when adding the clause resulted in a
+    /// conflict.
+    pub fn constrains_parent<N: SolverId>(
+        parent: VariableId,
+        aux: VariableId,
+        requirement: VersionSetId,
+        decision_tracker: &DecisionTracker,
+    ) -> (Option<Self>, bool, Clause<N>) {
+        let (kind, watched_literals, conflict) =
+            Clause::constrains_parent(parent, aux, requirement, decision_tracker);
 
         (
             Self::from_kind_and_initial_watches(watched_literals),
@@ -649,6 +751,28 @@ impl<I: Interner> Display for ClauseDisplay<'_, I> {
                     v1,
                     v2.display(self.variable_map, self.interner),
                     v2,
+                    self.interner.display_version_set(version_set_id)
+                )
+            }
+            Clause::ConstrainsExcluded(candidate, aux, version_set_id) => {
+                write!(
+                    f,
+                    "ConstrainsExcluded({}({:?}), {}({:?}), {})",
+                    candidate.display(self.variable_map, self.interner),
+                    candidate,
+                    aux.display(self.variable_map, self.interner),
+                    aux,
+                    self.interner.display_version_set(version_set_id)
+                )
+            }
+            Clause::ConstrainsParent(parent, aux, version_set_id) => {
+                write!(
+                    f,
+                    "ConstrainsParent({}({:?}), {}({:?}), {})",
+                    parent.display(self.variable_map, self.interner),
+                    parent,
+                    aux.display(self.variable_map, self.interner),
+                    aux,
                     self.interner.display_version_set(version_set_id)
                 )
             }

@@ -1344,6 +1344,126 @@ fn test_constrains_transitive() {
     "###);
 }
 
+/// The shared auxiliary-variable encoding emits the excluded candidates of a
+/// constraint only once: N parents sharing a constraint over a package with M
+/// excluded candidates produce M + N constrains clauses instead of N * M.
+#[test]
+fn test_constrains_shared_encoding_clause_count() {
+    let solve_and_count = |parents: usize| {
+        let mut provider = BundleBoxProvider::new();
+        // All 10 versions of pkg are excluded, enough for the shared encoding.
+        for v in 1..=10u32 {
+            provider.add_package("pkg", v.into(), &[], &[]);
+        }
+        let parent_names = (0..parents).map(|i| format!("p{i}")).collect::<Vec<_>>();
+        for name in &parent_names {
+            provider.add_package(name, 1.into(), &[], &["pkg 11..100"]);
+        }
+        let requirements =
+            provider.requirements(&parent_names.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        solver
+            .solve(problem)
+            .expect("nothing requires pkg, so the constraints are never violated");
+        solver.clause_count()
+    };
+
+    // Each additional parent adds one requires clause and one parent clause;
+    // the 10 excluded-candidate clauses are emitted only once.
+    let single_parent = solve_and_count(1);
+    let many_parents = solve_and_count(5);
+    assert_eq!(many_parents - single_parent, 4 * 2);
+}
+
+/// Constraints that exclude only a few candidates keep the direct pairwise
+/// encoding: every parent emits one clause per excluded candidate.
+#[test]
+fn test_constrains_pairwise_encoding_clause_count() {
+    let solve_and_count = |parents: usize| {
+        let mut provider = BundleBoxProvider::new();
+        // Only 2 versions of pkg are excluded, too few for the shared encoding.
+        provider.add_package("pkg", 1.into(), &[], &[]);
+        provider.add_package("pkg", 2.into(), &[], &[]);
+        let parent_names = (0..parents).map(|i| format!("p{i}")).collect::<Vec<_>>();
+        for name in &parent_names {
+            provider.add_package(name, 1.into(), &[], &["pkg 11..100"]);
+        }
+        let requirements =
+            provider.requirements(&parent_names.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        solver
+            .solve(problem)
+            .expect("nothing requires pkg, so the constraints are never violated");
+        solver.clause_count()
+    };
+
+    // Each additional parent adds one requires clause and one pairwise clause
+    // per excluded candidate.
+    let single_parent = solve_and_count(1);
+    let many_parents = solve_and_count(5);
+    assert_eq!(many_parents - single_parent, 4 * 3);
+}
+
+/// Like `test_unsat_constrains`, but with enough excluded candidates for the
+/// constraint to use the shared auxiliary-variable encoding. The rendered
+/// conflict must look exactly as if the constraint was encoded pairwise.
+#[test]
+fn test_unsat_constrains_shared_encoding() {
+    let mut provider = BundleBoxProvider::from_packages(&[
+        ("a", 10, vec!["b 50..100"]),
+        ("b", 55, vec![]),
+        ("b", 54, vec![]),
+        ("b", 53, vec![]),
+        ("b", 52, vec![]),
+        ("b", 51, vec![]),
+        ("b", 50, vec![]),
+        ("b", 42, vec![]),
+    ]);
+
+    provider.add_package("c", 10.into(), &[], &["b 0..50"]);
+    let error = solve_unsat(provider, &["a", "c"]);
+    insta::assert_snapshot!(error);
+}
+
+/// Reverse direction through the shared encoding: an installed candidate that
+/// is excluded by the constraint forbids the constraint's parent.
+#[test]
+fn test_unsat_constrains_shared_encoding_reverse() {
+    // x forces b=1, while a constrains b to [5,100) which excludes b=1..4.
+    let mut provider = BundleBoxProvider::from_packages(&[
+        ("x", 1, vec!["b 1..2"]),
+        ("b", 1, vec![]),
+        ("b", 2, vec![]),
+        ("b", 3, vec![]),
+        ("b", 4, vec![]),
+    ]);
+    provider.add_package("a", 1.into(), &[], &["b 5..100"]);
+    let error = solve_unsat(provider, &["x", "a"]);
+    insta::assert_snapshot!(error);
+}
+
+/// Multiple parents sharing the same constraint through the shared encoding.
+#[test]
+fn test_unsat_constrains_shared_encoding_multiple_parents() {
+    let mut provider = BundleBoxProvider::from_packages(&[
+        ("a", 10, vec!["b 50..100"]),
+        ("b", 55, vec![]),
+        ("b", 54, vec![]),
+        ("b", 53, vec![]),
+        ("b", 52, vec![]),
+        ("b", 51, vec![]),
+        ("b", 50, vec![]),
+        ("b", 42, vec![]),
+    ]);
+
+    provider.add_package("c", 10.into(), &[], &["b 0..50"]);
+    provider.add_package("d", 10.into(), &[], &["b 0..50"]);
+    let error = solve_unsat(provider, &["a", "c", "d"]);
+    insta::assert_snapshot!(error);
+}
+
 /// Multiple constraints from different parents on the same package.
 #[test]
 fn test_constrains_multiple_parents() {

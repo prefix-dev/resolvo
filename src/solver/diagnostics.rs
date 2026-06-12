@@ -43,7 +43,9 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 Clause::Learnt(..) => {
                     learned_clauses += 1;
                 }
-                Clause::Constrains(..) => {
+                Clause::Constrains(..)
+                | Clause::ConstrainsExcluded(..)
+                | Clause::ConstrainsParent(..) => {
                     constrains_clauses += 1;
                 }
                 Clause::AnyOf(..) => {
@@ -60,6 +62,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 None => assertion_clauses += 1,
                 Some(_) => match clause {
                     Clause::Constrains(..)
+                    | Clause::ConstrainsExcluded(..)
+                    | Clause::ConstrainsParent(..)
                     | Clause::ForbidMultipleInstances(..)
                     | Clause::Lock(..)
                     | Clause::AnyOf(..) => binary_watched += 1,
