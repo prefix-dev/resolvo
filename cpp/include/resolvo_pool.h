@@ -9,6 +9,12 @@ namespace resolvo {
  * every element added.
  *
  * Id's are allocated in a monotonically increasing fashion, starting from 0.
+ * Because ids are handed out contiguously and never reused, the ids produced
+ * by a Pool are *dense* (zero-based and gap-free), which is exactly the
+ * invariant resolvo requires of provider-supplied ids such as `NameId` and
+ * `SolvableId`. Using a Pool is therefore the recommended way to satisfy that
+ * contract. See the documentation on `SolvableId` for details on why dense ids
+ * matter and why resolvo cannot validate them for you.
  */
 template <typename ID, typename T>
 struct Pool {

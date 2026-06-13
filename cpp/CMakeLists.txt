@@ -4,13 +4,20 @@ cmake_minimum_required(VERSION 3.21)
 # linking
 project(Resolvo LANGUAGES C CXX)
 
-# Add the Corrosion dependency (used to build Rust code)
 include(FetchContent)
-FetchContent_Declare(
-  Corrosion
-  GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-  GIT_TAG v0.5.1)
-FetchContent_MakeAvailable(Corrosion)
+
+# Add the Corrosion dependency (used to build Rust code). Prefer a Corrosion
+# already provided by the environment (e.g. the conda-forge `corrosion` package
+# used when building the Pixi package), which keeps the build hermetic. Fall
+# back to fetching it for plain in-tree builds where it isn't installed.
+find_package(Corrosion QUIET)
+if(NOT Corrosion_FOUND)
+  FetchContent_Declare(
+    Corrosion
+    GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+    GIT_TAG v0.6.1)
+  FetchContent_MakeAvailable(Corrosion)
+endif()
 
 # Extract the version from the rust crate
 corrosion_parse_package_version("${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
@@ -132,10 +139,12 @@ if(BUILD_SHARED_LIBS)
             DESTINATION ${CMAKE_INSTALL_LIBDIR})
   endif()
   if(WIN32)
-    install(
-      FILES $<TARGET_LINKER_FILE:${resolvo_cpp_impl}>
-      DESTINATION ${CMAKE_INSTALL_LIBDIR}
-      RENAME resolvo_cpp.lib)
+    # Install the import library under its natural name (`resolvo_cpp.dll.lib`),
+    # which is what the generated ResolvoConfig.cmake references via
+    # IMPORTED_IMPLIB. Renaming it would make find_package look for a file that
+    # does not exist.
+    install(FILES $<TARGET_LINKER_FILE:${resolvo_cpp_impl}>
+            DESTINATION ${CMAKE_INSTALL_LIBDIR})
   endif()
 else()
   install(FILES $<TARGET_FILE:${resolvo_cpp_impl}>
@@ -145,13 +154,34 @@ endif()
 include(CMakePackageConfigHelpers)
 
 function(_resolvo_write_configure_file)
+  # On Windows the runtime DLL is installed next to the other binaries (bin) so
+  # it is found via PATH, while the import library lives in lib (the common
+  # conda-forge layout). Elsewhere the shared object lives in lib. Point each
+  # imported property at the directory it is actually installed to.
+  if(WIN32)
+    set(_resolvo_runtime_dir ${CMAKE_INSTALL_BINDIR})
+  else()
+    set(_resolvo_runtime_dir ${CMAKE_INSTALL_LIBDIR})
+  endif()
+
   foreach(
     prop
     IMPORTED_LOCATION
     IMPORTED_LOCATION_DEBUG
     IMPORTED_LOCATION_RELEASE
     IMPORTED_LOCATION_RELWITHDEBINFO
-    IMPORTED_LOCATION_MINSIZEREL
+    IMPORTED_LOCATION_MINSIZEREL)
+    get_target_property(value ${resolvo_cpp_impl} ${prop})
+
+    if(value)
+      get_filename_component(value ${value} NAME)
+      list(APPEND RESOLVO_LIB_PROPERTIES ${prop}
+           "\${PACKAGE_PREFIX_DIR}/${_resolvo_runtime_dir}/${value}")
+    endif()
+  endforeach()
+
+  foreach(
+    prop
     IMPORTED_IMPLIB
     IMPORTED_IMPLIB_DEBUG
     IMPORTED_IMPLIB_RELEASE
@@ -162,7 +192,7 @@ function(_resolvo_write_configure_file)
     if(value)
       get_filename_component(value ${value} NAME)
       list(APPEND RESOLVO_LIB_PROPERTIES ${prop}
-           "\${_IMPORT_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${value}")
+           "\${PACKAGE_PREFIX_DIR}/${CMAKE_INSTALL_LIBDIR}/${value}")
     endif()
   endforeach()
 
@@ -195,4 +225,8 @@ install(
 
 if(RESOLVO_BUILD_TESTING)
   add_subdirectory(tests)
+endif()
+
+if(RESOLVO_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()

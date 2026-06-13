@@ -55,6 +55,22 @@ Originally resolvo started out as a port/fork of [libsolv](https://github.com/op
 * Resolvo optionally provides an async interface to allow concurrent metadata fetching.
 * However, Libsolv is more extensive and supports more complex queries.
 
+## C++ bindings
+
+Resolvo ships C++ bindings (see [`cpp/`](./cpp)). A runnable example that solves sudoku puzzles with the solver lives in [`cpp/examples`](./cpp/examples). With [Pixi](https://pixi.sh) you can build and run it from the repository root:
+
+```shell
+pixi run cpp-example-sudoku
+```
+
+Pass your own puzzle as an 81-character string (`.` or `0` for empty cells):
+
+```shell
+pixi run cpp-example-sudoku "53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79"
+```
+
+See the [example README](./cpp/examples/README.md) for more details.
+
 ## Contributing 😍
 
 We would love to have you contribute! 
