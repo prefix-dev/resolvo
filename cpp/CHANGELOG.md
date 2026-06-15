@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A runnable `sudoku` example under `cpp/examples`, porting the Rust sudoku example to C++.
+- `pixi build` packaging: the bindings (`resolvo-cpp`, `cpp/pixi.toml`) and the sudoku example (`resolvo-cpp-sudoku`, `cpp/examples/pixi.toml`) are now defined as Pixi packages, with the example depending on the bindings via a path dependency. Run it from the workspace root with `pixi run cpp-example-sudoku`.
+
+### Changed
+- Document that provider-supplied ids (`SolvableId`, `NameId`, `VersionSetId`, ...) must be *dense* (contiguous and zero-based). This invariant cannot be validated at the FFI boundary, so it is now spelled out on each id type, on the `DependencyProvider` interface, and on the `Pool` helper.
+
 ## [0.2.0](https://github.com/mamba-org/resolvo/releases/tag/resolvo_cpp-v0.2.0) - 2024-06-11
 
 ### Added

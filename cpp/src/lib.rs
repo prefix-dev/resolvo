@@ -8,10 +8,26 @@ use resolvo::{HintDependenciesAvailable, KnownDependencies, SolverCache};
 
 use crate::{slice::Slice, string::String, vector::Vector};
 
-/// A unique identifier for a single solvable or candidate of a package. These
-/// ids should not be random but rather monotonic increasing. Although it is
-/// fine to have gaps, resolvo will allocate some memory based on the maximum
-/// id.
+/// A unique identifier for a single solvable or candidate of a package.
+///
+/// # IDs must be dense
+///
+/// Resolvo treats this id as a *dense* index: ids handed to the solver must be
+/// allocated as a contiguous, zero-based sequence (`0, 1, 2, ...`) without
+/// gaps. The raw `id` is used directly to index vector-backed storage inside
+/// the solver, so the largest id you hand out determines the size of several
+/// internal allocations.
+///
+/// Leaving gaps is not a memory-safety problem, but it is wasteful: allocating
+/// ids `0` and `1000` with nothing in between forces resolvo to allocate room
+/// for all `1001` slots, most of which are never used.
+///
+/// This invariant **cannot be validated** at the FFI boundary. The id crosses
+/// into Rust as an opaque `u32`, so resolvo has no way to check that the ids
+/// you produce form a dense range. Upholding it is the responsibility of the
+/// [`DependencyProvider`] implementation. The `resolvo::Pool` helper in
+/// `resolvo_pool.h` hands out dense ids for you and is the recommended way to
+/// satisfy this contract.
 ///
 /// cbindgen:derive-eq
 /// cbindgen:derive-neq
@@ -74,6 +90,10 @@ impl From<crate::Requirement> for resolvo::Requirement {
 /// A unique identifier for a version set union. A version set union describes
 /// the union (logical OR) of a non-empty set of version sets belonging to
 /// more than one package.
+///
+/// Like every other id in this API, these must be *dense*: allocated as a
+/// contiguous, zero-based sequence without gaps. See [`SolvableId`] for the
+/// rationale and why resolvo cannot validate it for you.
 /// cbindgen:derive-eq
 /// cbindgen:derive-neq
 #[repr(C)]
@@ -96,6 +116,10 @@ impl From<crate::VersionSetUnionId> for resolvo::VersionSetUnionId {
 
 /// A unique identifier for a single version set. A version set describes a
 /// set of versions.
+///
+/// Like every other id in this API, these must be *dense*: allocated as a
+/// contiguous, zero-based sequence without gaps. See [`SolvableId`] for the
+/// rationale and why resolvo cannot validate it for you.
 /// cbindgen:derive-eq
 /// cbindgen:derive-neq
 #[repr(C)]
@@ -118,6 +142,10 @@ impl From<VersionSetId> for resolvo::VersionSetId {
 
 /// A unique identifier for a single package name. Resolvo will only select
 /// one candidate for each unique name.
+///
+/// Like every other id in this API, these must be *dense*: allocated as a
+/// contiguous, zero-based sequence without gaps. See [`SolvableId`] for the
+/// rationale and why resolvo cannot validate it for you.
 /// cbindgen:derive-eq
 /// cbindgen:derive-neq
 #[repr(C)]
@@ -139,6 +167,10 @@ impl From<NameId> for resolvo::NameId {
 }
 
 /// The string id is a unique identifier for a string.
+///
+/// Like every other id in this API, these must be *dense*: allocated as a
+/// contiguous, zero-based sequence without gaps. See [`SolvableId`] for the
+/// rationale and why resolvo cannot validate it for you.
 /// cbindgen:derive-eq
 /// cbindgen:derive-neq
 #[repr(C)]
@@ -160,6 +192,10 @@ impl From<StringId> for resolvo::StringId {
 }
 
 /// A unique identifier for a single condition.
+///
+/// Like every other id in this API, these must be *dense*: allocated as a
+/// contiguous, zero-based sequence without gaps. See [`SolvableId`] for the
+/// rationale and why resolvo cannot validate it for you.
 /// cbindgen:derive-eq
 /// cbindgen:derive-neq
 #[repr(C)]

@@ -20,6 +20,16 @@ using cbindgen_private::VersionSetUnionId;
 
 /**
  * An interface that implements ecosystem specific logic.
+ *
+ * Every id handed to resolvo through this interface (`NameId`, `SolvableId`,
+ * `VersionSetId`, `VersionSetUnionId`, `StringId` and `ConditionId`) must be
+ * *dense*: allocated as a contiguous, zero-based sequence (`0, 1, 2, ...`)
+ * without gaps. Resolvo uses these ids directly to index vector-backed
+ * storage, so gaps waste memory and the largest id you hand out determines the
+ * size of several internal allocations. This invariant cannot be validated at
+ * the FFI boundary, so upholding it is the responsibility of the
+ * implementation. The `resolvo::Pool` helper hands out dense ids for you. See
+ * the documentation on `SolvableId` for the full rationale.
  */
 struct DependencyProvider {
     virtual ~DependencyProvider() = default;

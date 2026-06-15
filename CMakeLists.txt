@@ -12,6 +12,10 @@ add_feature_info(RESOLVO_BUILD_TESTING RESOLVO_BUILD_TESTING
                  "configure whether to build the test suite")
 include(CTest)
 
+option(RESOLVO_BUILD_EXAMPLES "Build examples" OFF)
+add_feature_info(RESOLVO_BUILD_EXAMPLES RESOLVO_BUILD_EXAMPLES
+                 "configure whether to build the examples")
+
 set(RESOLVO_IS_TOPLEVEL_BUILD TRUE)
 
 # Place all compiled examples into the same bin directory on Windows, where

@@ -3,6 +3,9 @@ name = "resolvo"
 authors = ["Bas Zalmstra <bas@prefix.dev>"]
 channels = ["https://prefix.dev/conda-forge"]
 platforms = ["linux-64", "win-64", "osx-arm64", "osx-64"]
+# Enables the `pixi build` package system, used to build the C++ bindings
+# (`resolvo-cpp`) and the sudoku example (`resolvo-cpp-sudoku`) as packages.
+preview = ["pixi-build"]
 
 [tasks]
 format = {depends-on = ["format-rust", "format-cpp", "format-cmake"] }
@@ -23,13 +26,14 @@ features = ["build-rust", "test-rust"]
 solve-group = "default"
 
 # ---- Build C++ using CMake ----
-[feature.build-cpp.dependencies]
-cmake = ">=3.29.4,<3.30"
-cxx-compiler = ">=1.7.0,<1.8"
-ninja = ">=1.12.1,<1.13"
+# The build toolchain (cmake, ninja, the C/C++/Rust compilers and corrosion) is
+# pulled in through the resolvo-cpp dev dependency, whose package build requires
+# it, so it does not need to be listed here separately.
+[feature.build-cpp.dev]
+resolvo-cpp = { path = "cpp" }
 
 [feature.build-cpp.tasks.configure]
-cmd = "cmake -GNinja -S . -B build -DRESOLVO_BUILD_TESTING=ON"
+cmd = "cmake -GNinja -S . -B build -DRESOLVO_BUILD_TESTING=ON -DRESOLVO_BUILD_EXAMPLES=ON"
 inputs = ["CMakeLists.txt"]
 outputs = ["build/CMakeFiles/"]
 
@@ -53,10 +57,10 @@ clang-format = ">=18.1.6,<18.2"
 cmake-format = ">=0.6.13,<0.7"
 
 [feature.format-cpp.tasks.format-cpp]
-cmd = "clang-format -i cpp/include/*.h cpp/tests/*.cpp"
+cmd = "clang-format -i cpp/include/*.h cpp/tests/*.cpp cpp/examples/*/*.cpp"
 
 [feature.format-cpp.tasks.format-cmake]
-cmd = "cmake-format -i CMakeLists.txt cpp/CMakeLists.txt cpp/tests/CMakeLists.txt" 
+cmd = "cmake-format -i CMakeLists.txt cpp/CMakeLists.txt cpp/tests/CMakeLists.txt cpp/examples/CMakeLists.txt cpp/examples/*/CMakeLists.txt"
 
 [environments.format-cpp]
 features=["format-cpp"]
@@ -64,3 +68,15 @@ solve-group="default"
 
 [dependencies]
 python = ">=3.14.3,<3.15"
+
+# ---- Run the C++ sudoku example ----
+# Builds the example package (and its `resolvo-cpp` dependency) and runs its
+# `sudoku` binary with `pixi run cpp-example-sudoku`.
+[feature.cpp-example.dependencies]
+resolvo-cpp-sudoku = { path = "cpp/examples/sudoku" }
+
+[feature.cpp-example.tasks.cpp-example-sudoku]
+cmd = "sudoku"
+
+[environments.cpp-example]
+features = ["cpp-example"]

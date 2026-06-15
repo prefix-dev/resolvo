@@ -1,16 +1,8 @@
 @PACKAGE_INIT@
 
-get_filename_component(_IMPORT_PREFIX "${CMAKE_CURRENT_LIST_FILE}" PATH)
-get_filename_component(_IMPORT_PREFIX "${_IMPORT_PREFIX}" PATH)
-get_filename_component(_IMPORT_PREFIX "${_IMPORT_PREFIX}" PATH)
-get_filename_component(_IMPORT_PREFIX "${_IMPORT_PREFIX}" PATH)
-if(_IMPORT_PREFIX STREQUAL "/")
-  set(_IMPORT_PREFIX "")
-endif()
-
 add_library(@resolvo_cpp_impl@ @cmake_lib_type@ IMPORTED)
 set_target_properties(@resolvo_cpp_impl@ PROPERTIES @RESOLVO_LIB_PROPERTIES@)
 
-set(_IMPORT_PREFIX)
-
 include("${CMAKE_CURRENT_LIST_DIR}/ResolvoTargets.cmake")
+
+check_required_components(Resolvo)

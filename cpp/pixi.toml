@@ -1,0 +1,28 @@
+# Pixi package definition for the resolvo C++ bindings.
+#
+# This builds `cpp/CMakeLists.txt` (which installs the `Resolvo` CMake package:
+# the shared/static library, the public headers and the package config files)
+# into a conda package named `resolvo-cpp`. Other packages, such as the sudoku
+# example in `cpp/examples`, depend on it via a path dependency and consume it
+# through `find_package(Resolvo)`.
+#
+# The workspace table lives in the top-level manifest, so it is intentionally
+# omitted here.
+
+[package]
+name = "resolvo-cpp"
+version = "0.3.0"
+
+[package.build]
+backend = { name = "pixi-build-cmake", version = "0.*" }
+
+# The bindings build a Rust crate alongside the C++ code, so request the Rust
+# compiler in addition to the C/C++ compilers. Listing compilers replaces the
+# backend's default (c, cxx), so all three are specified here.
+[package.build.config]
+compilers = ["c", "cxx", "rust"]
+
+# Corrosion drives the Rust build. Providing it as a package keeps the build
+# hermetic (no git clone), so the CMake build finds it via find_package.
+[package.build-dependencies]
+corrosion = "0.6.*"
