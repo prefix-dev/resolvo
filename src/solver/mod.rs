@@ -228,6 +228,13 @@ pub(crate) struct SolverState<D: DependencyProvider> {
     /// once, when the variable is allocated.
     constrains_aux_vars: HashMap<VersionSetId, VariableId>,
 
+    /// The gate variable of the shared requires encoding per requirement. The
+    /// single candidate disjunction (`Clause::Requires` on the gate) is emitted
+    /// exactly once, when the variable is allocated; each requirer then only
+    /// adds a binary implication to the gate. See
+    /// [`variable_map::VariableOrigin::RequiresGate`].
+    requires_aux_vars: HashMap<Requirement, VariableId>,
+
     pub(crate) decision_tracker: DecisionTracker,
 
     /// Activity score per package.
@@ -277,6 +284,7 @@ impl<D: DependencyProvider> Default for SolverState<D> {
             at_most_one_trackers: Default::default(),
             at_least_one_tracker: Default::default(),
             constrains_aux_vars: Default::default(),
+            requires_aux_vars: Default::default(),
             decision_tracker: Default::default(),
             name_activity: Default::default(),
             max_activity: 0.0,

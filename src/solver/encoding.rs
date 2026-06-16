@@ -146,6 +146,12 @@ struct ConstraintCandidatesAvailable<'a, S> {
 /// clauses need at most as many clauses and propagate in a single hop.
 const CONSTRAINS_AUX_ENCODING_THRESHOLD: usize = 4;
 
+/// The minimum number of candidates an unconditional requirement must have
+/// before the shared gate encoding is used (see [`Encoder::add_shared_requires`]).
+/// Below this, re-emitting the small disjunction per requirer is cheaper than
+/// the gate variable, its disjunction clause and the extra propagation hop.
+const REQUIRES_AUX_ENCODING_THRESHOLD: usize = 4;
+
 impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     pub fn new(
         state: &'a mut SolverState<D>,
@@ -458,9 +464,29 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             conditions.push(None);
         }
 
+        let candidate_count: usize = version_set_variables.iter().map(Vec::len).sum();
+
         for condition in conditions {
             // Add the requirements clause
             let no_candidates = candidates.iter().all(|candidates| candidates.is_empty());
+
+            // Shared requires encoding: for an unconditional requirement of a
+            // non-root solvable with enough candidates, encode the candidate
+            // disjunction once on a shared gate variable and let this requirer
+            // imply the gate. Many solvables typically share the same
+            // requirement (version set), so this collapses a large number of
+            // duplicated giant disjunctions into one disjunction plus a binary
+            // implication per requirer. Root requirements stay direct so the
+            // decision heuristic can still recognise them as explicit.
+            if condition.is_none()
+                && !no_candidates
+                && !variable.is_root()
+                && candidate_count >= REQUIRES_AUX_ENCODING_THRESHOLD
+            {
+                self.add_shared_requires(variable, requirement.requirement, &version_set_variables);
+                continue;
+            }
+
             let condition_literals =
                 condition.map(|id| self.state.disjunctions[id].literals.as_slice());
             let (watched_literals, conflict, kind) = WatchedLiterals::requires(
@@ -496,6 +522,92 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         self.state
             .requirement_to_sorted_candidates
             .insert(requirement.requirement, version_set_variables);
+    }
+
+    /// Encodes an unconditional requirement `parent -> (c1 ∨ ... ∨ cN)` using a
+    /// shared gate variable, so the (often huge) candidate disjunction is
+    /// emitted once per requirement instead of once per requirer:
+    ///
+    /// - once per requirement: the disjunction `(¬gate ∨ c1 ∨ ... ∨ cN)`;
+    /// - once per requirer: the binary implication `(¬parent ∨ gate)`.
+    ///
+    /// This mirrors the shared-constrains encoding (see
+    /// [`Encoder::on_constraint_candidates_available`]).
+    fn add_shared_requires(
+        &mut self,
+        parent: VariableId,
+        requirement: crate::Requirement,
+        version_set_variables: &[Vec<VariableId>],
+    ) {
+        let gate = match self.state.requires_aux_vars.get(&requirement) {
+            Some(&gate) => gate,
+            None => {
+                let gate = self
+                    .state
+                    .variable_map
+                    .alloc_requires_gate_variable(requirement);
+                self.state.requires_aux_vars.insert(requirement, gate);
+
+                // The shared disjunction, watched and registered with the decide
+                // queue exactly as a normal requires clause (its parent is the
+                // gate variable rather than a solvable).
+                let (watched_literals, conflict, kind) = WatchedLiterals::requires(
+                    gate,
+                    requirement,
+                    version_set_variables.iter().flatten().copied(),
+                    None,
+                    &self.state.decision_tracker,
+                );
+                let clause_id = self.state.add_clause(watched_literals, kind);
+
+                let names = requirement
+                    .version_sets(self.cache.provider())
+                    .map(|version_set| self.cache.provider().version_set_name(version_set));
+                self.state
+                    .add_requires_clause(gate, requirement, None, clause_id, names);
+
+                // `conflict` means every candidate is already false, so the
+                // disjunction reduces to `¬gate`. For a real requirer that is a
+                // conflict, but the gate is a fresh helper variable, so we just
+                // force it false; requirers then propagate to false through
+                // their implications.
+                if conflict {
+                    self.state
+                        .decision_tracker
+                        .try_add_decision(Decision::new(gate, false, clause_id), self.level)
+                        .expect("a freshly allocated gate variable cannot already be assigned");
+                }
+
+                gate
+            }
+        };
+
+        // The implication `parent -> gate`, encoded as the binary clause
+        // `(gate ∨ ¬parent)` (the `AnyOf` shape).
+        let (watched_literals, kind) = WatchedLiterals::any_of(gate, parent);
+        let clause_id = self.state.add_clause(watched_literals, kind);
+
+        // Honor assignments already made for either end of the implication, the
+        // same way the other incremental encoders do.
+        let forced = match (
+            self.state.decision_tracker.assigned_value(parent),
+            self.state.decision_tracker.assigned_value(gate),
+        ) {
+            (Some(true), Some(false)) => {
+                // The requirer is installed but the gate is already false.
+                self.conflicting_clauses.push(clause_id);
+                return;
+            }
+            (Some(true), None) => Some(Decision::new(gate, true, clause_id)),
+            (None, Some(false)) => Some(Decision::new(parent, false, clause_id)),
+            _ => None,
+        };
+        if let Some(decision) = forced {
+            self.state
+                .decision_tracker
+                .try_add_decision(decision, self.level)
+                .expect("we checked that the variable is not yet assigned");
+        }
     }
 
     /// Called when the candidates for a particular constraint are available.

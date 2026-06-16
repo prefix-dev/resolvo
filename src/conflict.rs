@@ -118,6 +118,46 @@ impl Conflict {
             }
         }
 
+        // The shared requires encoding links a requirer to its candidate
+        // disjunction through a gate variable: a binary `AnyOf(gate, parent)`
+        // clause per requirer plus one `Requires(gate, ..)` disjunction. Collect
+        // the requirers per gate so the original `parent -> candidate` edges can
+        // be reconstructed when the gate's `Requires` clause is processed below.
+        let mut requires_gate_parents: HashMap<VariableId, Vec<SolvableIdOrRoot<D::SolvableId>>> =
+            HashMap::default();
+        for clause_id in &self.clauses {
+            if let Clause::AnyOf(selected, parent) = state.clauses.kinds[clause_id.to_index()] {
+                if matches!(
+                    state.variable_map.origin(selected),
+                    VariableOrigin::RequiresGate(_)
+                ) {
+                    if let Some(parent) = parent.as_solvable_or_root(&state.variable_map) {
+                        requires_gate_parents
+                            .entry(selected)
+                            .or_default()
+                            .push(parent);
+                    }
+                }
+            }
+        }
+        // If a gate is part of the conflict but its requirer's implication
+        // clause is not, recover the requirer from the gate's assignment reason.
+        for clause_id in &self.clauses {
+            if let Clause::Requires(gate, _, _) = state.clauses.kinds[clause_id.to_index()] {
+                if matches!(
+                    state.variable_map.origin(gate),
+                    VariableOrigin::RequiresGate(_)
+                ) && !requires_gate_parents.contains_key(&gate)
+                {
+                    if let Some(Clause::AnyOf(_, parent)) = reason_clause(gate) {
+                        if let Some(parent) = parent.as_solvable_or_root(&state.variable_map) {
+                            requires_gate_parents.insert(gate, vec![parent]);
+                        }
+                    }
+                }
+            }
+        }
+
         // Avoids adding the same edge once for each side of a chain.
         type ConstrainsEdge<S> = (SolvableIdOrRoot<S>, SolvableIdOrRoot<S>, VersionSetId);
         let mut constrains_edges: HashSet<ConstrainsEdge<D::SolvableId>> = HashSet::new();
@@ -145,34 +185,46 @@ impl Conflict {
                 }
                 Clause::Learnt(..) => unreachable!(),
                 &Clause::Requires(package_id, _condition, version_set_id) => {
-                    let solvable = package_id
-                        .as_solvable_or_root(&state.variable_map)
-                        .expect("only solvables can be excluded");
-                    let package_node = Self::add_node(&mut graph, &mut nodes, solvable);
+                    // The requiring solvable(s). With the shared requires
+                    // encoding the clause's parent is a gate variable; expand it
+                    // to the real requirers reconstructed above. A direct
+                    // requires clause has a single solvable/root parent.
+                    let parents: Vec<SolvableIdOrRoot<D::SolvableId>> =
+                        match package_id.as_solvable_or_root(&state.variable_map) {
+                            Some(solvable) => vec![solvable],
+                            None => requires_gate_parents
+                                .get(&package_id)
+                                .cloned()
+                                .unwrap_or_default(),
+                        };
 
                     let candidates = solver.async_runtime.block_on(solver.cache.get_or_cache_sorted_candidates(version_set_id)).unwrap_or_else(|_| {
                         unreachable!("The version set was used in the solver, so it must have been cached. Therefore cancellation is impossible here and we cannot get an `Err(...)`")
                     });
-                    if candidates.is_empty() {
-                        tracing::trace!(
-                            "{package_id:?} requires {version_set_id:?}, which has no candidates"
-                        );
-                        graph.add_edge(
-                            package_node,
-                            unresolved_node,
-                            ConflictEdge::Requires(version_set_id),
-                        );
-                    } else {
-                        for &candidate_id in candidates {
-                            tracing::trace!("{package_id:?} requires {candidate_id:?}");
 
-                            let candidate_node =
-                                Self::add_node(&mut graph, &mut nodes, candidate_id.into());
+                    for parent in parents {
+                        let package_node = Self::add_node(&mut graph, &mut nodes, parent);
+                        if candidates.is_empty() {
+                            tracing::trace!(
+                                "{parent:?} requires {version_set_id:?}, which has no candidates"
+                            );
                             graph.add_edge(
                                 package_node,
-                                candidate_node,
+                                unresolved_node,
                                 ConflictEdge::Requires(version_set_id),
                             );
+                        } else {
+                            for &candidate_id in candidates {
+                                tracing::trace!("{parent:?} requires {candidate_id:?}");
+
+                                let candidate_node =
+                                    Self::add_node(&mut graph, &mut nodes, candidate_id.into());
+                                graph.add_edge(
+                                    package_node,
+                                    candidate_node,
+                                    ConflictEdge::Requires(version_set_id),
+                                );
+                            }
                         }
                     }
                 }
@@ -283,10 +335,18 @@ impl Conflict {
                     }
                 }
                 Clause::AnyOf(selected, _variable) => {
-                    // Assumption: since `AnyOf` of clause can never be false, we dont add an edge
-                    // for it.
-                    let decision_map = solver.state.decision_tracker.map();
-                    debug_assert_ne!(selected.positive().eval(decision_map), Some(false));
+                    // No edge: at-least-one `AnyOf` clauses can never be false
+                    // (the selected variable is only ever propagated true), and
+                    // requires-gate implications are represented by the
+                    // `parent -> candidate` edges drawn from the gate's
+                    // `Requires` clause above.
+                    if !matches!(
+                        state.variable_map.origin(*selected),
+                        VariableOrigin::RequiresGate(_)
+                    ) {
+                        let decision_map = solver.state.decision_tracker.map();
+                        debug_assert_ne!(selected.positive().eval(decision_map), Some(false));
+                    }
                 }
             }
         }
