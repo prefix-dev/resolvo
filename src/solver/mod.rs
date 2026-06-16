@@ -1476,6 +1476,9 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
         let mut causes_at_current_level = 0u32;
         let mut learnt = Vec::new();
         let mut back_track_to = 0;
+        // Index in `learnt` of the highest-level non-asserting literal, moved
+        // to the front below so it becomes the second watch (watch2onhighest).
+        let mut highest_level_idx = 0;
 
         let mut s_value;
         let mut learnt_why = Vec::new();
@@ -1511,8 +1514,11 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                                 .assigned_value(literal.variable())
                                 .unwrap(),
                         );
+                        if decision_level > back_track_to {
+                            back_track_to = decision_level;
+                            highest_level_idx = learnt.len();
+                        }
                         learnt.push(learnt_literal);
-                        back_track_to = back_track_to.max(decision_level);
                     } else {
                         unreachable!();
                     }
@@ -1542,6 +1548,13 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             if causes_at_current_level == 0 {
                 break;
             }
+        }
+
+        // Watch the two highest-level literals: the asserting literal (pushed
+        // last) and the highest-level of the rest (moved to the front). They
+        // are unassigned last on backtracking, so the watches move least.
+        if !learnt.is_empty() {
+            learnt.swap(0, highest_level_idx);
         }
 
         let last_literal = Literal::new(conflicting_solvable, s_value);
