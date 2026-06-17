@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    DenseIndex, Interner, VariableId, VersionSetId,
+    DenseIndex, Interner, Requirement, VariableId, VersionSetId,
     internal::solver_id::SolvableIdOrRoot,
     solver_id::{IdMap, SolverId},
 };
@@ -43,6 +43,16 @@ pub(crate) enum VariableOrigin<N, S> {
     /// A variable that indicates that a candidate excluded by a constraint's
     /// version set is installed.
     ConstrainsViolation(VersionSetId),
+
+    /// The output variable of the OR-gate formed by a requirement's candidate
+    /// disjunction `c1 | ... | cN`, in the Tseitin circuit-to-CNF sense.
+    /// Requirers imply the gate (`requirer -> gate`) and the gate implies the
+    /// disjunction (`gate -> c1 | ... | cN`), so the (often large) disjunction is
+    /// defined once and shared by every requirer instead of being repeated for
+    /// each. Only the `gate -> disjunction` direction is encoded (the gate is
+    /// never forced true except by a requirer): the one-sided Plaisted-Greenbaum
+    /// encoding, mirroring the constrains side at the opposite polarity.
+    RequiresGate(Requirement),
 }
 
 impl<N: SolverId, S: SolverId> Default for VariableMap<N, S> {
@@ -127,6 +137,12 @@ impl<N: SolverId, S: SolverId> VariableMap<N, S> {
         self.alloc(VariableOrigin::ConstrainsViolation(version_set))
     }
 
+    /// Allocate a variable that gates the shared candidate disjunction of a
+    /// requirement (see [`VariableOrigin::RequiresGate`]).
+    pub fn alloc_requires_gate_variable(&mut self, requirement: Requirement) -> VariableId {
+        self.alloc(VariableOrigin::RequiresGate(requirement))
+    }
+
     /// Returns the origin of a variable. The origin describes the semantics of
     /// a variable.
     #[inline]
@@ -194,6 +210,9 @@ impl<I: Interner> Display for VariableDisplay<'_, I> {
                         .display_name(self.interner.version_set_name(version_set)),
                     self.interner.display_version_set(version_set)
                 )
+            }
+            VariableOrigin::RequiresGate(requirement) => {
+                write!(f, "requires-gate({})", requirement.display(self.interner))
             }
         }
     }
