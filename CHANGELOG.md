@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.11.0...resolvo-v0.11.1) - 2026-06-17
+
+### Added
+
+- document dense ids and add a runnable C++ sudoku example ([#241](https://github.com/prefix-dev/resolvo/pull/241))
+
+### Other
+
+- share the requires disjunction across requirers with a gate variable per requirement ([#246](https://github.com/prefix-dev/resolvo/pull/246))
+- watch the highest-decision-level literal in learned clauses ([#245](https://github.com/prefix-dev/resolvo/pull/245))
+- release resolvo-cpp v0.4.0 ([#243](https://github.com/prefix-dev/resolvo/pull/243))
+
 ## [0.11.0](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.10.4...resolvo-v0.11.0) - 2026-06-12
 
 ### Fixed
