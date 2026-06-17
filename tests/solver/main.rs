@@ -2216,3 +2216,166 @@ fn test_decide_queue_union_duplicate_name() {
 }
 
 mod decide_queue_prop;
+
+/// A generated dependency graph: `(name, version, deps)` triples plus root specs.
+type GateFuzzGraph = (Vec<(String, u32, Vec<String>)>, Vec<String>);
+
+/// A tiny xorshift RNG used to generate the shared-requires gate fuzz graphs.
+struct GateFuzzRng(u64);
+
+impl GateFuzzRng {
+    fn new(seed: u64) -> Self {
+        Self(seed.wrapping_mul(0x9E3779B97F4A7C15) | 1)
+    }
+
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+}
+
+/// Generates a random dependency graph as `(name, version, deps)` triples plus a
+/// set of root requirements. Multi-version packages produce requirements with
+/// enough candidates to be encoded behind a shared gate, the structure that
+/// triggered the stranded-gate bug.
+fn gen_gate_fuzz_graph(seed: u64) -> GateFuzzGraph {
+    let mut r = GateFuzzRng::new(seed);
+    let n = 5 + (r.next() % 6) as usize;
+    let names: Vec<String> = (0..n).map(|i| format!("p{i}")).collect();
+    let mut pkgs = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        let versions = 1 + (r.next() % 5) as u32;
+        for v in 1..=versions {
+            let num_deps = (r.next() % 4) as usize;
+            let mut deps = Vec::new();
+            for _ in 0..num_deps {
+                let j = (r.next() as usize) % n;
+                if j == i {
+                    continue;
+                }
+                if r.next() % 3 == 0 {
+                    let lo = 1 + (r.next() % 3) as u32;
+                    let hi = lo + 1 + (r.next() % 3) as u32;
+                    deps.push(format!("{} {}..{}", names[j], lo, hi));
+                } else {
+                    deps.push(names[j].clone());
+                }
+            }
+            pkgs.push((name.clone(), v, deps));
+        }
+    }
+    let num_roots = 1 + (r.next() % 3) as usize;
+    let roots = (0..num_roots)
+        .map(|_| names[(r.next() as usize) % n].clone())
+        .collect();
+    (pkgs, roots)
+}
+
+/// Checks that `sol` is a *complete* solution of `(pkgs, roots)`: every root and
+/// every dependency of an installed package is satisfied by an installed
+/// package.
+fn validate_complete(
+    pkgs: &[(String, u32, Vec<String>)],
+    roots: &[String],
+    sol: &[(String, u32)],
+) -> Result<(), String> {
+    use std::collections::HashMap;
+    let chosen: HashMap<&str, u32> = sol.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+    let satisfied = |spec: &str| -> bool {
+        let mut it = spec.split_whitespace();
+        let name = it.next().unwrap();
+        let Some(&cv) = chosen.get(name) else {
+            return false;
+        };
+        match it.next() {
+            None => true,
+            Some(range) => {
+                let mut p = range.split("..");
+                let lo: u32 = p.next().unwrap().parse().unwrap();
+                let hi: u32 = p.next().unwrap().parse().unwrap();
+                cv >= lo && cv < hi
+            }
+        }
+    };
+    for root in roots {
+        if !satisfied(root) {
+            return Err(format!("root `{root}` is unsatisfied"));
+        }
+    }
+    for (name, version) in sol {
+        let deps = &pkgs
+            .iter()
+            .find(|(n, v, _)| n == name && v == version)
+            .unwrap()
+            .2;
+        for dep in deps {
+            if !satisfied(dep) {
+                return Err(format!(
+                    "{name}=={version} requires `{dep}` which is absent"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Solves `(pkgs, roots)` through the async `BundleBoxProvider` with `delay_seed`
+/// (which varies the encode/backtrack interleaving). Returns the installed
+/// `(name, version)` set, or `None` if the problem is reported unsatisfiable.
+fn solve_gate_fuzz(
+    pkgs: &[(String, u32, Vec<String>)],
+    roots: &[String],
+    delay_seed: u64,
+) -> Option<Vec<(String, u32)>> {
+    let pp: Vec<(&str, u32, Vec<&str>)> = pkgs
+        .iter()
+        .map(|(n, v, d)| (n.as_str(), *v, d.iter().map(String::as_str).collect()))
+        .collect();
+    let mut provider = BundleBoxProvider::from_packages(&pp);
+    provider.sleep_before_return = true;
+    provider.delay_seed = delay_seed;
+    let root_specs: Vec<&str> = roots.iter().map(String::as_str).collect();
+    let reqs = provider.requirements(&root_specs);
+    // A seeded `delay_seed` drives ordering through cooperative polling, not
+    // timers, so the runtime needs no time support.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut solver = Solver::new(provider).with_runtime(rt);
+    let solution = solver.solve(Problem::new().requirements(reqs)).ok()?;
+    Some(
+        solution
+            .iter()
+            .map(|s| {
+                let display = format!("{}", solver.provider().display_solvable(*s));
+                let mut it = display.split('=');
+                (
+                    it.next().unwrap().to_string(),
+                    it.next_back().unwrap().parse().unwrap(),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Regression for the shared-requires gate (PR #246): an async-ordering
+/// backtrack could strand the gate (unassign it while a requirer stayed
+/// installed), silently dropping the gated requirement. This fuzzer-derived
+/// graph (`p3==3` requires the gated `p7`) reproduces it across delay seeds;
+/// every returned solution must be complete.
+#[test]
+fn shared_requires_gate_survives_backtrack() {
+    let (pkgs, roots) = gen_gate_fuzz_graph(542);
+    for delay_seed in 1..=12u64 {
+        if let Some(sol) = solve_gate_fuzz(&pkgs, &roots, 542_000 + delay_seed) {
+            validate_complete(&pkgs, &roots, &sol).unwrap_or_else(|e| {
+                panic!(
+                    "delay seed {} produced an incomplete solution: {e}",
+                    542_000 + delay_seed
+                )
+            });
+        }
+    }
+}

@@ -44,11 +44,14 @@ pub(crate) enum VariableOrigin<N, S> {
     /// version set is installed.
     ConstrainsViolation(VersionSetId),
 
-    /// A variable that gates the shared "at least one candidate" disjunction
-    /// for a requirement. Many solvables can require the same version set; each
-    /// requirer implies this gate, and the gate implies the (single, shared)
-    /// candidate disjunction, so the disjunction is encoded once instead of
-    /// once per requirer.
+    /// The output variable of the OR-gate formed by a requirement's candidate
+    /// disjunction `c1 | ... | cN`, in the Tseitin circuit-to-CNF sense.
+    /// Requirers imply the gate (`requirer -> gate`) and the gate implies the
+    /// disjunction (`gate -> c1 | ... | cN`), so the (often large) disjunction is
+    /// defined once and shared by every requirer instead of being repeated for
+    /// each. Only the `gate -> disjunction` direction is encoded (the gate is
+    /// never forced true except by a requirer): the one-sided Plaisted-Greenbaum
+    /// encoding, mirroring the constrains side at the opposite polarity.
     RequiresGate(Requirement),
 }
 

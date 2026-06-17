@@ -25,13 +25,41 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashSet,
     fmt::Display,
+    future::Future,
+    pin::Pin,
     rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    task::{Context, Poll},
     time::Duration,
 };
+
+/// A future that is `Pending` for exactly `remaining` polls (waking itself each
+/// time) and then `Ready`. The encoder drives the provider's futures with a
+/// `FuturesUnordered` on a current-thread runtime, whose poll order is
+/// deterministic, so the number of pending polls controls the order in which
+/// calls resolve as a pure function of the input, with no dependence on
+/// wall-clock time (unlike `tokio::time::sleep`).
+struct PendingPolls {
+    remaining: u32,
+}
+
+impl Future for PendingPolls {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        if self.remaining == 0 {
+            Poll::Ready(())
+        } else {
+            self.remaining -= 1;
+            // Re-schedule ourselves so the executor polls us again.
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+}
 
 use ahash::HashMap;
 pub use conditional_spec::{ConditionalSpec, SpecCondition};
@@ -61,6 +89,12 @@ pub struct BundleBoxProvider {
     concurrent_requests: Arc<AtomicUsize>,
     pub concurrent_requests_max: Rc<Cell<usize>>,
     pub sleep_before_return: bool,
+    /// When non-zero, `maybe_delay` varies the number of pending polls per call
+    /// using a seeded hash, exploring different (but fully deterministic) async
+    /// encoding orders. Different seeds give different orders; a given seed
+    /// always reproduces the same one.
+    pub delay_seed: u64,
+    delay_counter: Cell<u64>,
     /// When set, candidates are returned with
     /// [`HintDependenciesAvailable::All`], which makes the solver prefetch
     /// (and encode) the dependencies of requirement candidates as soon as the
@@ -210,8 +244,28 @@ impl BundleBoxProvider {
     // runtime available)
     async fn maybe_delay<T: Send + 'static>(&self, value: T) -> T {
         if self.sleep_before_return {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            if self.delay_seed == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                self.concurrent_requests.fetch_sub(1, Ordering::SeqCst);
+                return value;
+            }
+            let n = self.delay_counter.get();
+            self.delay_counter.set(n + 1);
+            let mut h = self.delay_seed ^ n.wrapping_mul(0x9E3779B97F4A7C15);
+            h ^= h >> 30;
+            h = h.wrapping_mul(0xBF58476D1CE4E5B9);
+            h ^= h >> 27;
             self.concurrent_requests.fetch_sub(1, Ordering::SeqCst);
+            // Mimic prefetch cache hits: ~1/3 of calls resolve synchronously
+            // (no pending poll -> no yield), the rest stay pending for a seeded
+            // number of polls. The mix of sync and async returns is what a
+            // prefetching provider produces, and the poll count gives a
+            // deterministic, wall-clock-independent resolution order.
+            let polls = match h % 3 {
+                0 => 0, // synchronous (cache hit)
+                _ => 1 + (h >> 2) as u32 % 20,
+            };
+            PendingPolls { remaining: polls }.await;
             value
         } else {
             value

@@ -3,7 +3,7 @@ use std::{any::Any, collections::VecDeque};
 use super::{SolverState, clause::WatchedLiterals, conditions};
 use crate::{
     Candidates, ConditionId, ConditionalRequirement, DenseIndex, Dependencies, DependencyProvider,
-    SolverCache, StringId, VariableId, VersionSetId,
+    Requirement, SolverCache, StringId, VariableId, VersionSetId,
     internal::{id::ClauseId, solver_id::SolvableIdOrRoot},
     solver::{
         conditions::{DeferredConjunct, DeferredRequirement, Disjunction},
@@ -524,9 +524,11 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             .insert(requirement.requirement, version_set_variables);
     }
 
-    /// Encodes an unconditional requirement `parent -> (c1 ∨ ... ∨ cN)` using a
-    /// shared gate variable, so the (often huge) candidate disjunction is
-    /// emitted once per requirement instead of once per requirer:
+    /// Encodes an unconditional requirement `parent -> (c1 ∨ ... ∨ cN)` through
+    /// a per-requirement gate variable (see
+    /// [`super::variable_map::VariableOrigin::RequiresGate`]), so the (often huge)
+    /// candidate disjunction is emitted once per requirement instead of once per
+    /// requirer:
     ///
     /// - once per requirement: the disjunction `(¬gate ∨ c1 ∨ ... ∨ cN)`;
     /// - once per requirer: the binary implication `(¬parent ∨ gate)`.
@@ -536,7 +538,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     fn add_shared_requires(
         &mut self,
         parent: VariableId,
-        requirement: crate::Requirement,
+        requirement: Requirement,
         version_set_variables: &[Vec<VariableId>],
     ) {
         let gate = match self.state.requires_aux_vars.get(&requirement) {
@@ -548,9 +550,8 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     .alloc_requires_gate_variable(requirement);
                 self.state.requires_aux_vars.insert(requirement, gate);
 
-                // The shared disjunction, watched and registered with the decide
-                // queue exactly as a normal requires clause (its parent is the
-                // gate variable rather than a solvable).
+                // The shared disjunction, encoded as a normal requires clause
+                // whose parent is the gate.
                 let (watched_literals, conflict, kind) = WatchedLiterals::requires(
                     gate,
                     requirement,
@@ -566,11 +567,9 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 self.state
                     .add_requires_clause(gate, requirement, None, clause_id, names);
 
-                // `conflict` means every candidate is already false, so the
-                // disjunction reduces to `¬gate`. For a real requirer that is a
-                // conflict, but the gate is a fresh helper variable, so we just
-                // force it false; requirers then propagate to false through
-                // their implications.
+                // All candidates already false: the disjunction reduces to
+                // `¬gate`. The gate is a fresh helper, so just force it false
+                // (requirers then propagate false through their implications).
                 if conflict {
                     self.state
                         .decision_tracker
@@ -587,8 +586,15 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         let (watched_literals, kind) = WatchedLiterals::any_of(gate, parent);
         let clause_id = self.state.add_clause(watched_literals, kind);
 
-        // Honor assignments already made for either end of the implication, the
-        // same way the other incremental encoders do.
+        // Track the requirer so a backtrack that strands the gate can be
+        // repaired (see [`SolverState::force_stuck_gates`]).
+        self.state
+            .requires_gate_requirers
+            .entry(gate)
+            .or_default()
+            .push((parent, clause_id));
+
+        // Honor assignments already made for either end of the implication.
         let forced = match (
             self.state.decision_tracker.assigned_value(parent),
             self.state.decision_tracker.assigned_value(gate),
