@@ -84,6 +84,7 @@ pub struct BundleBoxProvider {
     favored: HashMap<String, Pack>,
     locked: HashMap<String, Pack>,
     excluded: HashMap<String, HashMap<Pack, String>>,
+    allow_multiple: HashSet<String>,
     cancel_solving: Cell<bool>,
     // TODO: simplify?
     concurrent_requests: Arc<AtomicUsize>,
@@ -203,6 +204,10 @@ impl BundleBoxProvider {
             .entry(package_name.to_owned())
             .or_default()
             .insert(Pack::new(version), reason.into());
+    }
+
+    pub fn set_allow_multiple(&mut self, package_name: &str) {
+        self.allow_multiple.insert(package_name.to_owned());
     }
 
     pub fn set_locked(&mut self, package_name: &str, version: u32) {
@@ -418,6 +423,7 @@ impl DependencyProvider for BundleBoxProvider {
             } else {
                 HintDependenciesAvailable::None
             },
+            allow_multiple: self.allow_multiple.contains(package_name),
             ..Candidates::default()
         };
         let favor = self.favored.get(package_name);

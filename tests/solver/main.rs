@@ -2379,3 +2379,143 @@ fn shared_requires_gate_survives_backtrack() {
         }
     }
 }
+
+mod allow_multiple_versions {
+    use super::*;
+
+    /// Non-overlapping version requirements are unsolvable without `allow_multiple`.
+    #[test]
+    fn test_non_overlapping_requirements_unsat_without_allow_multiple() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("kernel", 1.into(), &[], &[]);
+        provider.add_package("kernel", 2.into(), &[], &[]);
+        provider.add_package("kernel", 3.into(), &[], &[]);
+        provider.add_package("kmod-a", 1.into(), &["kernel 1..2"], &[]);
+        provider.add_package("kmod-b", 1.into(), &["kernel 3..4"], &[]);
+
+        let result = solve_unsat(provider, &["kmod-a", "kmod-b"]);
+        assert_snapshot!(result);
+    }
+
+    /// When `allow_multiple` is set, non-overlapping version requirements
+    /// from different dependents are solved by installing multiple versions.
+    #[test]
+    fn test_non_overlapping_requirements() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("kernel", 1.into(), &[], &[]);
+        provider.add_package("kernel", 2.into(), &[], &[]);
+        provider.add_package("kernel", 3.into(), &[], &[]);
+        provider.set_allow_multiple("kernel");
+        provider.add_package("kmod-a", 1.into(), &["kernel 1..2"], &[]);
+        provider.add_package("kmod-b", 1.into(), &["kernel 3..4"], &[]);
+
+        let requirements = provider.requirements(&["kmod-a", "kmod-b"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+    kernel=1
+    kernel=3
+    kmod-a=1
+    kmod-b=1
+    ");
+    }
+
+    /// When dependents' version requirements overlap, each requirement independently
+    /// selects its best (highest) candidate. Here kmod-a picks kernel=2 (highest in 1..3)
+    /// and kmod-b picks kernel=3 (highest in 2..4), so both are installed even though
+    /// kernel=2 alone would satisfy both requirements.
+    ///
+    /// This is actually NOT ideal - installing only kernel=2 would be optimal - but resolving
+    /// overlapping ranges to a single common version would require additional optimization in
+    /// the solver (e.g. soft forbid clauses or a post-solve minimization pass).
+    #[test]
+    fn test_overlapping_requirements() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("kernel", 1.into(), &[], &[]);
+        provider.add_package("kernel", 2.into(), &[], &[]);
+        provider.add_package("kernel", 3.into(), &[], &[]);
+        provider.set_allow_multiple("kernel");
+        provider.add_package("kmod-a", 1.into(), &["kernel 1..3"], &[]);
+        provider.add_package("kmod-b", 1.into(), &["kernel 2..4"], &[]);
+
+        let requirements = provider.requirements(&["kmod-a", "kmod-b"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+    kernel=2
+    kernel=3
+    kmod-a=1
+    kmod-b=1
+    ");
+    }
+
+    /// `allow_multiple` works correctly when the multiversion package is required by a
+    /// transitive dependency discovered in a later solver pass (i.e. a different
+    /// Encoder invocation than the one that first processed the package's candidates).
+    /// Uses two `allow_multiple` packages with version-pinned dependencies between them:
+    /// each kmod version is built against a specific kernel, so installing multiple kmod
+    /// versions transitively pulls in multiple kernels.
+    ///
+    /// The explanation may sound a bit tormented, but it exists to catch a regression
+    /// encountered with the original implementation.
+    #[test]
+    fn test_allow_multiple_transitive() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("kernel", 1.into(), &[], &[]);
+        provider.add_package("kernel", 2.into(), &[], &[]);
+        provider.add_package("kernel", 3.into(), &[], &[]);
+        provider.set_allow_multiple("kernel");
+        provider.add_package("kmod", 1.into(), &["kernel 1..2"], &[]);
+        provider.add_package("kmod", 2.into(), &["kernel 2..3"], &[]);
+        provider.add_package("kmod", 3.into(), &["kernel 3..4"], &[]);
+        provider.set_allow_multiple("kmod");
+        provider.add_package("app-old", 1.into(), &["kmod 1..2"], &[]);
+        provider.add_package("app-new", 1.into(), &["kmod 3..4"], &[]);
+
+        let requirements = provider.requirements(&["app-old", "app-new"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+    app-new=1
+    app-old=1
+    kernel=1
+    kernel=3
+    kmod=1
+    kmod=3
+    ");
+    }
+
+    /// Soft requirements model the "already installed" scenario: the solver tries to keep
+    /// each requested version, but when one is excluded the solve still succeeds with the
+    /// multiple remaining versions.
+    #[test]
+    fn test_soft_requirements_with_allow_multiple() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("kernel", 1.into(), &[], &[]);
+        provider.add_package("kernel", 2.into(), &[], &[]);
+        provider.add_package("kernel", 3.into(), &[], &[]);
+        provider.set_allow_multiple("kernel");
+        provider.exclude("kernel", 1, "retracted due to security issue");
+
+        let k1 = provider.solvable_id("kernel", 1u32);
+        let k2 = provider.solvable_id("kernel", 2u32);
+        let k3 = provider.solvable_id("kernel", 3u32);
+        let requirements = provider.requirements(&["kernel"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new()
+            .requirements(requirements)
+            .soft_requirements(vec![k1, k2, k3]);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+    kernel=2
+    kernel=3
+    ");
+    }
+}

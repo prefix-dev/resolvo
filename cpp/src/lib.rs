@@ -368,6 +368,11 @@ pub struct Candidates {
     /// consider these solvables when forming a solution but will use
     /// them in the error message if no solution could be found.
     pub excluded: Vector<ExcludedSolvable>,
+
+    /// When `true`, the solver allows multiple solvables of this package to
+    /// appear in the solution simultaneously. By default only one version of
+    /// each package can be selected.
+    pub allow_multiple: bool,
 }
 
 impl Default for Candidates {
@@ -378,6 +383,7 @@ impl Default for Candidates {
             locked: std::ptr::null(),
             hint_dependencies_available: Vector::default(),
             excluded: Vector::default(),
+            allow_multiple: false,
         }
     }
 }
@@ -599,6 +605,7 @@ impl resolvo::DependencyProvider for &DependencyProvider {
             locked: std::ptr::null(),
             hint_dependencies_available: Vector::default(),
             excluded: Vector::default(),
+            allow_multiple: false,
         };
         unsafe { (self.get_candidates)(self.data, name.into(), NonNull::from(&mut candidates)) };
 
@@ -619,6 +626,7 @@ impl resolvo::DependencyProvider for &DependencyProvider {
                     .iter()
                     .map(|excluded| (excluded.solvable.into(), excluded.reason.into()))
                     .collect(),
+                allow_multiple: candidates.allow_multiple,
             })
         }
     }
