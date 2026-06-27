@@ -34,7 +34,9 @@ pub use id::{
 };
 use itertools::Itertools;
 pub use requirement::Requirement;
-pub use solver::{EmptySolvables, Problem, Solver, SolverCache, UnsolvableOrCancelled};
+pub use solver::{
+    EmptySolvables, Problem, Solver, SolverCache, SolverConfig, UnsolvableOrCancelled,
+};
 pub use solver_id::{DenseId, IdMap, IdSet, SolverId, SparseId};
 pub use utils::{IndexedSet, Mapping, MappingIter};
 
@@ -157,6 +159,15 @@ pub trait DependencyProvider: Sized + Interner {
     /// [UnsolvableOrCancelled::Cancelled].
     fn should_cancel_with_value(&self) -> Option<Box<dyn Any>> {
         None
+    }
+
+    /// Returns the solver configuration for this dependency provider.
+    ///
+    /// Override this to customize solver behavior. The returned config is used
+    /// by [`Solver::new`] unless explicitly overridden with
+    /// [`Solver::with_config`].
+    fn solver_config(&self) -> SolverConfig {
+        SolverConfig::default()
     }
 }
 
