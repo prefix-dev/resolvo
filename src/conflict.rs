@@ -862,6 +862,21 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
         }
     }
 
+    /// Returns the reason a solvable was excluded, if it was.
+    fn excluded_reason(&self, solvable_id: I::SolvableId) -> Option<StringId> {
+        let graph = &self.graph.graph;
+        let node = graph
+            .node_indices()
+            .find(|&node| graph[node] == ConflictNode::Solvable(solvable_id))?;
+        graph.edges(node).find_map(|e| match e.weight() {
+            ConflictEdge::Conflict(ConflictCause::Excluded) => match graph[e.target()] {
+                ConflictNode::Excluded(reason) => Some(reason),
+                _ => unreachable!("an excluded edge must point to an excluded node"),
+            },
+            _ => None,
+        })
+    }
+
     fn fmt_graph(
         &self,
         f: &mut Formatter<'_>,
@@ -1188,16 +1203,12 @@ impl<I: Interner> fmt::Display for DisplayUnsat<'_, I> {
             writeln!(f, "The following packages are incompatible")?;
             self.fmt_graph(f, &top_level_conflicts, true)?;
 
-            // Conflicts caused by locked dependencies
-            let mut edges = self.graph.graph.edges(self.graph.root_node).peekable();
-            let indenter = Indenter::new(true);
-            while let Some(e) = edges.next() {
-                let indenter = indenter.push_level_with_order(match edges.peek() {
-                    Some(_) => ChildOrder::HasRemainingSiblings,
-                    None => ChildOrder::Last,
-                });
-                let indent = indenter.get_indent();
-
+            // Conflicts caused by locked dependencies. Every `Lock` clause
+            // produces its own root edge, one per forbidden candidate, so the
+            // lines are deduplicated by the solvable that is locked.
+            let mut reported_locked = HashSet::new();
+            let mut lines = Vec::new();
+            for e in self.graph.graph.edges(self.graph.root_node) {
                 let conflict = match e.weight() {
                     ConflictEdge::Requires(_) => continue,
                     ConflictEdge::Conflict(conflict) => conflict,
@@ -1206,27 +1217,49 @@ impl<I: Interner> fmt::Display for DisplayUnsat<'_, I> {
                 // The only possible conflict at the root level is a Locked conflict
                 match conflict {
                     &ConflictCause::Constrains(version_set_id) => {
-                        writeln!(
-                            f,
-                            "{indent}the constraint {name} {version_set} cannot be fulfilled",
+                        lines.push(format!(
+                            "the constraint {name} {version_set} cannot be fulfilled",
                             name = self
                                 .interner
                                 .display_name(self.interner.version_set_name(version_set_id)),
                             version_set = self.interner.display_version_set(version_set_id),
-                        )?;
+                        ));
                     }
                     &ConflictCause::ForbidMultipleInstances => {
                         unreachable!()
                     }
                     &ConflictCause::Locked(solvable_id) => {
-                        writeln!(
-                            f,
-                            "{indent}{} is locked, but another version is required as reported above",
-                            self.interner.display_merged_solvables(&[solvable_id]),
-                        )?;
+                        if !reported_locked.insert(solvable_id) {
+                            continue;
+                        }
+                        // A locked solvable that is itself excluded rules the
+                        // package out entirely; the reason is part of the
+                        // conflict, so report it instead of implying that the
+                        // locked version would work.
+                        match self.excluded_reason(solvable_id) {
+                            Some(reason) => lines.push(format!(
+                                "{} is locked, but it is excluded because {}",
+                                self.interner.display_merged_solvables(&[solvable_id]),
+                                self.interner.display_string(reason),
+                            )),
+                            None => lines.push(format!(
+                                "{} is locked, but another version is required as reported above",
+                                self.interner.display_merged_solvables(&[solvable_id]),
+                            )),
+                        }
                     }
                     ConflictCause::Excluded => continue,
                 };
+            }
+
+            let indenter = Indenter::new(true);
+            let mut lines = lines.into_iter().peekable();
+            while let Some(line) = lines.next() {
+                let indenter = indenter.push_level_with_order(match lines.peek() {
+                    Some(_) => ChildOrder::HasRemainingSiblings,
+                    None => ChildOrder::Last,
+                });
+                writeln!(f, "{}{line}", indenter.get_indent())?;
             }
         }
 
