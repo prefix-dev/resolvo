@@ -434,6 +434,28 @@ fn test_unsat_locked_and_excluded() {
     insta::assert_snapshot!(solve_snapshot(provider, &["asdf"]));
 }
 
+/// A locked solvable that is itself excluded rules out the whole package:
+/// the lock forbids every other candidate and the exclusion the locked one.
+/// The conflict must surface the exclusion reason, otherwise the report
+/// claims the locked version is required while hiding why it cannot be used.
+#[test]
+fn test_unsat_locked_solvable_is_excluded() {
+    let mut provider = BundleBoxProvider::from_packages(&[
+        ("c", 1, vec![]),
+        ("c", 2, vec![]),
+        ("c", 3, vec![]),
+        ("c", 4, vec![]),
+    ]);
+    provider.set_locked("c", 1);
+    provider.exclude("c", 1, "it is not available locally");
+    insta::assert_snapshot!(solve_snapshot(provider, &["c"]), @r"
+    The following packages are incompatible
+    └─ c * can be installed with any of the following options:
+       └─ c 2 | 3 | 4
+    └─ c 1 is locked, but it is excluded because it is not available locally
+    ");
+}
+
 #[test]
 #[tracing_test::traced_test]
 fn test_unsat_no_candidates_for_child_1() {

@@ -1,8 +1,9 @@
 ---
-source: tests/solver.rs
+source: tests/solver/main.rs
+assertion_line: 946
 expression: "solve_for_snapshot(provider, &requirements, &constraints)"
 ---
 The following packages are incompatible
 └─ union * can be installed with any of the following options:
    └─ union 1
-├─ the constraint union >=5, <6 cannot be fulfilled
+└─ the constraint union >=5, <6 cannot be fulfilled
