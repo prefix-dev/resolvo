@@ -27,6 +27,17 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
       - run: cargo rustdoc --all-features -- -D warnings -W unreachable-pub
 
+  semver-check:
+    name: SemVer check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --version 0.48.0 --locked
+      - name: Check public API compatibility
+        run: cargo semver-checks check-release --package resolvo
+
   format_and_lint:
     name: Format and Lint
     runs-on: ubuntu-latest

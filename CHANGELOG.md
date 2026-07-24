@@ -7,20 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.11.2](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.11.1...resolvo-v0.11.2) - 2026-06-26
+## [0.12.0](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.11.1...resolvo-v0.12.0) - 2026-07-24
 
 ### Added
 
-- support multiversion packages ([#239](https://github.com/prefix-dev/resolvo/pull/239))
+- [**breaking**] support multiversion packages ([#239](https://github.com/prefix-dev/resolvo/pull/239))
 
 ### Fixed
 
 - update pixi lock file ([#249](https://github.com/prefix-dev/resolvo/pull/249))
+- report the exclusion reason for an excluded locked solvable ([#255](https://github.com/prefix-dev/resolvo/pull/255))
 
 ### Other
 
 - *(ci)* bump actions/checkout from 6.0.3 to 7.0.0 ([#248](https://github.com/prefix-dev/resolvo/pull/248))
 - *(ci)* bump MarcoIeni/release-plz-action from 0.5.129 to 0.5.130 ([#244](https://github.com/prefix-dev/resolvo/pull/244))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#250](https://github.com/prefix-dev/resolvo/pull/250))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#251](https://github.com/prefix-dev/resolvo/pull/251))
+- *(ci)* bump prefix-dev/setup-pixi from 0.9.6 to 0.10.0 ([#253](https://github.com/prefix-dev/resolvo/pull/253))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.130 to 0.5.131 ([#254](https://github.com/prefix-dev/resolvo/pull/254))
 
 ## [0.11.1](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.11.0...resolvo-v0.11.1) - 2026-06-17
 
