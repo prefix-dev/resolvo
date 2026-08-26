@@ -19,6 +19,14 @@ use indexmap::IndexMap;
 
 type PendingTask<'cache, D> = LocalBoxFuture<'cache, Result<TaskResult<'cache, D>, Box<dyn Any>>>;
 
+/// Selects how provider futures are queued. This is deliberately an internal solver detail rather
+/// than a capability exposed by [`crate::runtime::AsyncRuntime`].
+#[derive(Copy, Clone)]
+pub(super) enum FutureQueueMode {
+    Immediate,
+    PendingCapable,
+}
+
 type RequirementCondition<'a, S> = Option<(ConditionId, Vec<Vec<DisjunctionComplement<'a, S>>>)>;
 
 /// Fetches each version set's sorted candidates while avoiding `try_join_all`'s
@@ -86,9 +94,10 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     /// A set of packages that should have an at-least-once tracker.
     new_at_least_one_packages: IndexMap<D::NameId, VariableId, ahash::RandomState>,
 
-    /// Results from futures that completed immediately during
-    /// `try_immediate_or_queue`.
+    /// Results from futures that completed immediately during `queue_future`.
     pending_results: VecDeque<Result<TaskResult<'cache, D>, Box<dyn Any>>>,
+
+    future_queue_mode: FutureQueueMode,
 }
 
 /// The result of a future that was queued for processing.
@@ -185,6 +194,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         cache: &'cache SolverCache<D>,
         root_dependencies: &'cache Dependencies,
         level: u32,
+        future_queue_mode: FutureQueueMode,
     ) -> Self {
         Self {
             state,
@@ -197,28 +207,34 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             level,
             new_at_least_one_packages: IndexMap::default(),
             pending_results: VecDeque::new(),
+            future_queue_mode,
         }
     }
 
-    /// Poll `future` once on the stack. If it resolves immediately (as all
-    /// futures do under [`NowOrNeverRuntime`]), record the result for
-    /// iterative processing; otherwise hand the boxed future off to
-    /// [`Self::pending_futures`] for later polling.
+    /// Queue a provider future while avoiding allocation for the default non-yielding runtime.
     ///
-    /// We still box the future, so the allocation cost is the same. The
-    /// win over pushing straight to `FuturesUnordered` is avoiding its slab
-    /// and waker bookkeeping.
+    /// In immediate mode, [`FutureExt::now_or_never`] owns the stack future and pins it in place for
+    /// its single poll. A ready future is consumed, while a pending future is dropped and causes the
+    /// caller's `expect` to panic; it is never moved after being polled. In pending-capable mode the
+    /// future must instead be boxed before its first poll, because moving a polled `!Unpin` future
+    /// from the stack into the queue would be unsound.
     fn queue_future<F>(&mut self, future: F)
     where
         F: std::future::Future<Output = Result<TaskResult<'cache, D>, Box<dyn Any>>> + 'cache,
     {
-        let mut boxed = future.boxed_local();
-        match boxed.as_mut().now_or_never() {
-            Some(result) => self.pending_results.push_back(result),
-            None => {
-                // Future is still pending. Hand the boxed future to
-                // `pending_futures` so it can be polled asynchronously.
-                self.pending_futures.push(boxed);
+        match self.future_queue_mode {
+            FutureQueueMode::Immediate => {
+                let result = future
+                    .now_or_never()
+                    .expect("can only use non-yielding futures with the NowOrNeverRuntime");
+                self.pending_results.push_back(result);
+            }
+            FutureQueueMode::PendingCapable => {
+                let mut boxed = future.boxed_local();
+                match boxed.as_mut().now_or_never() {
+                    Some(result) => self.pending_results.push_back(result),
+                    None => self.pending_futures.push(boxed),
+                }
             }
         }
     }
