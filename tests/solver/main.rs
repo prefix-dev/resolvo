@@ -2541,3 +2541,159 @@ mod allow_multiple_versions {
     ");
     }
 }
+
+mod forbid_registration_regression {
+    use super::*;
+
+    /// Solves a simple provider built from `packages` for the given root specs
+    /// and returns the sorted transaction string.
+    fn solve_to_string(packages: &[(&str, u32, Vec<&str>)], specs: &[&str]) -> String {
+        let mut provider = BundleBoxProvider::from_packages(packages);
+        let requirements = provider.requirements(specs);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        transaction_to_string(solver.provider(), &solved)
+    }
+
+    /// A union over two non-overlapping version sets of the same package must
+    /// install exactly one version. Both lists must land in the same
+    /// `pending_forbid_clauses` bucket so the forbid-multiple clause is built.
+    #[test]
+    fn test_union_same_package_single_version() {
+        let result = solve_to_string(
+            &[("x", 1, vec![]), ("x", 2, vec![]), ("x", 3, vec![])],
+            &["x 1..2 | x 3..4"],
+        );
+        // Exactly one version of `x` must be selected: the forbid-multiple
+        // clause has to be registered for both candidate lists.
+        assert_eq!(result.matches("x=").count(), 1, "{result}");
+        assert_snapshot!(result, @"x=1");
+    }
+
+    /// Overlapping same-name version sets share candidate variables. The global
+    /// `forbid_seen` dedup must keep the duplicate from being pushed twice
+    /// while still registering every distinct candidate.
+    #[test]
+    fn test_union_overlapping_same_package_dedup() {
+        let result = solve_to_string(
+            &[("x", 1, vec![]), ("x", 2, vec![]), ("x", 3, vec![])],
+            &["x 1..3 | x 2..4"],
+        );
+        assert_eq!(result.matches("x=").count(), 1, "{result}");
+        assert_snapshot!(result, @"x=2");
+    }
+
+    /// An empty candidate list in the *first* version set of a union must be
+    /// skipped without disturbing the following non-empty list.
+    #[test]
+    fn test_union_empty_first_candidate_list() {
+        let result = solve_to_string(&[("a", 1, vec![]), ("b", 1, vec![])], &["a 5..6 | b 1..2"]);
+        assert_snapshot!(result, @"b=1");
+    }
+
+    /// An empty candidate list in a *later* version set of a union must also be
+    /// skipped while the earlier list still registers its forbid target.
+    #[test]
+    fn test_union_empty_second_candidate_list() {
+        let result = solve_to_string(&[("x", 1, vec![]), ("x", 2, vec![])], &["x 1..2 | x 5..6"]);
+        assert_snapshot!(result, @"x=1");
+    }
+
+    /// A locked solvable combined with a union requirement: the lock forbids the
+    /// non-locked candidates, so the union branch containing them resolves to the
+    /// locked version.
+    #[test]
+    fn test_locked_through_union() {
+        let mut provider = BundleBoxProvider::from_packages(&[
+            ("x", 1, vec![]),
+            ("x", 2, vec![]),
+            ("x", 3, vec![]),
+        ]);
+        provider.set_locked("x", 1);
+
+        let requirements = provider.requirements(&["x 2..3 | x 1..2"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @"x=1");
+    }
+
+    /// An excluded solvable inside a union branch: the exclusion clause forces
+    /// that branch off and the other union branch is selected.
+    #[test]
+    fn test_excluded_through_union() {
+        let mut provider = BundleBoxProvider::from_packages(&[
+            ("x", 1, vec![]),
+            ("x", 2, vec![]),
+            ("x", 3, vec![]),
+        ]);
+        provider.exclude("x", 2, "it is externally excluded");
+
+        let requirements = provider.requirements(&["x 2..3 | x 1..2"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @"x=1");
+    }
+
+    /// A union whose members are an `allow_multiple` package and a *normal*
+    /// package: skipping forbid registration for the multiversion member must
+    /// not leak into the sibling member. `single` is forced to version 2 while
+    /// the union offers `single=1`; without the normal package's forbid clause
+    /// both `single=1` and `single=2` would be installable.
+    #[test]
+    fn test_allow_multiple_does_not_disable_forbid_for_sibling_union_member() {
+        let mut provider = BundleBoxProvider::from_packages(&[
+            ("multi", 0, vec![]),
+            ("single", 1, vec![]),
+            ("single", 2, vec![]),
+            ("app-a", 1, vec!["multi 0..1 | single 1..2"]),
+            ("app-b", 1, vec!["single 2..3"]),
+        ]);
+        provider.set_allow_multiple("multi");
+
+        let requirements = provider.requirements(&["app-a", "app-b"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+    app-a=1
+    app-b=1
+    multi=0
+    single=2
+    ");
+    }
+
+    /// `allow_multiple` combined with an empty candidate list and a union, all
+    /// reached transitively: `helper 2..3` has no candidates (empty list is
+    /// skipped) while the two non-overlapping `multi` ranges install two
+    /// versions because forbid clauses are (correctly) suppressed for it.
+    #[test]
+    fn test_allow_multiple_union_with_empty_branch_transitive() {
+        let mut provider = BundleBoxProvider::from_packages(&[
+            ("multi", 1, vec![]),
+            ("multi", 2, vec![]),
+            ("multi", 3, vec![]),
+            ("helper", 1, vec![]),
+            ("app-a", 1, vec!["multi 1..2 | helper 2..3"]),
+            ("app-b", 1, vec!["multi 3..4"]),
+        ]);
+        provider.set_allow_multiple("multi");
+
+        let requirements = provider.requirements(&["app-a", "app-b"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).unwrap();
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @r"
+    app-a=1
+    app-b=1
+    multi=1
+    multi=3
+    ");
+    }
+}
