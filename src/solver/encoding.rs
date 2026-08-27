@@ -21,6 +21,33 @@ type PendingTask<'cache, D> = LocalBoxFuture<'cache, Result<TaskResult<'cache, D
 
 type RequirementCondition<'a, S> = Option<(ConditionId, Vec<Vec<DisjunctionComplement<'a, S>>>)>;
 
+/// Fetches each version set's sorted candidates while avoiding `try_join_all`'s
+/// per-future bookkeeping for the overwhelmingly common single-version-set case.
+/// Union members remain concurrent for dependency providers whose futures yield.
+async fn get_requirement_candidates<D: DependencyProvider>(
+    cache: &SolverCache<D>,
+    requirement: Requirement,
+) -> Result<Vec<&[D::SolvableId]>, Box<dyn Any>> {
+    match requirement {
+        Requirement::Single(version_set) => Ok(vec![
+            cache
+                .get_or_cache_sorted_candidates_for_version_set(version_set)
+                .await?,
+        ]),
+        Requirement::Union(version_set_union) => {
+            futures::future::try_join_all(
+                cache
+                    .provider()
+                    .version_sets_in_union(version_set_union)
+                    .map(|version_set| {
+                        cache.get_or_cache_sorted_candidates_for_version_set(version_set)
+                    }),
+            )
+            .await
+        }
+    }
+}
+
 /// An object that is responsible for encoding information from the dependency
 /// provider into rules and variables that are used by the solver.
 ///
@@ -853,15 +880,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     ) {
         let cache = self.cache;
         self.queue_future(async move {
-            let candidates = futures::future::try_join_all(
-                requirement
-                    .requirement
-                    .version_sets(cache.provider())
-                    .map(|version_set| {
-                        cache.get_or_cache_sorted_candidates_for_version_set(version_set)
-                    }),
-            )
-            .await?;
+            let candidates = get_requirement_candidates(cache, requirement.requirement).await?;
 
             Ok(TaskResult::RequirementCandidates(
                 RequirementCandidatesAvailable {
@@ -1039,15 +1058,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 }))
                 .await?;
 
-            let candidates = futures::future::try_join_all(
-                requirement
-                    .requirement
-                    .version_sets(cache.provider())
-                    .map(|version_set| {
-                        cache.get_or_cache_sorted_candidates_for_version_set(version_set)
-                    }),
-            )
-            .await?;
+            let candidates = get_requirement_candidates(cache, requirement.requirement).await?;
 
             Ok(TaskResult::RequirementCandidates(
                 RequirementCandidatesAvailable {

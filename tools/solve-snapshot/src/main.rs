@@ -30,7 +30,7 @@ struct Opts {
 
     /// The timeout to use for solving requirements in seconds. If a solve takes
     /// longer if will be cancelled.
-    #[clap(long, default_value = "60")]
+    #[clap(long, default_value = "10")]
     timeout: u64,
 
     /// The random seed to use for generating the requirements.
