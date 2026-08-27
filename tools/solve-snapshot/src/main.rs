@@ -10,7 +10,7 @@ use console::style;
 use csv::WriterBuilder;
 use itertools::Itertools;
 use rand::{
-    Rng, SeedableRng,
+    RngExt, SeedableRng,
     distr::{Distribution, weighted::WeightedIndex},
     prelude::IteratorRandom,
     rngs::StdRng,
