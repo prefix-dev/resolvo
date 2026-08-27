@@ -20,7 +20,7 @@ where
     I: StrInput<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, TextExpected<'src, I>>,
+    E::Error: LabelError<'src, I, TextExpected<()>>,
 {
     any()
         .try_map(|c: I::Token, span| {
@@ -31,7 +31,7 @@ where
                 Ok(c)
             } else {
                 Err(LabelError::expected_found(
-                    [TextExpected::IdentifierPart],
+                    [TextExpected::AnyIdentifier],
                     Some(MaybeRef::Val(c)),
                     span,
                 ))
@@ -46,7 +46,7 @@ where
                         Ok(())
                     } else {
                         Err(LabelError::expected_found(
-                            [TextExpected::IdentifierPart],
+                            [TextExpected::AnyIdentifier],
                             Some(MaybeRef::Val(c)),
                             span,
                         ))
