@@ -6,7 +6,7 @@ use clause::{Clause, Literal, WatchedLiterals};
 use conditions::{DeferredRequirement, Disjunction, DisjunctionId, condition_disjunct_holds};
 use decision::Decision;
 use decision_tracker::DecisionTracker;
-use encoding::Encoder;
+use encoding::{Encoder, FutureQueueMode};
 use indexmap::IndexMap;
 use itertools::Itertools;
 use variable_map::VariableMap;
@@ -186,6 +186,10 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
 
     /// Holds the current state of the solver.
     pub(crate) state: SolverState<D>,
+
+    /// Determines whether encoder futures may be polled later. Kept private so every custom
+    /// runtime remains pending-capable without extending the public runtime contract.
+    future_queue_mode: FutureQueueMode,
 
     /// The activity add factor. This is a value that is added to the activity
     /// score of each package that is part of a conflict.
@@ -372,6 +376,7 @@ impl<D: DependencyProvider> Solver<D, NowOrNeverRuntime> {
             cache: SolverCache::new(provider),
             async_runtime: NowOrNeverRuntime,
             state: SolverState::default(),
+            future_queue_mode: FutureQueueMode::Immediate,
             activity_add: 1.0,
             activity_decay: 0.95,
         }
@@ -448,6 +453,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             async_runtime: runtime,
             cache: self.cache,
             state: self.state,
+            future_queue_mode: FutureQueueMode::PendingCapable,
             activity_decay: self.activity_decay,
             activity_add: self.activity_add,
         }
@@ -634,8 +640,14 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 #[cfg(feature = "diagnostics")]
                 let encoding_start = std::time::Instant::now();
                 let conflicting_clauses = self.async_runtime.block_on(
-                    Encoder::new(&mut self.state, &self.cache, root_deps, level)
-                        .encode([root_solvable]),
+                    Encoder::new(
+                        &mut self.state,
+                        &self.cache,
+                        root_deps,
+                        level,
+                        self.future_queue_mode,
+                    )
+                    .encode([root_solvable]),
                 )?;
                 #[cfg(feature = "diagnostics")]
                 {
@@ -789,8 +801,14 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             #[cfg(feature = "diagnostics")]
             let encoding_start = std::time::Instant::now();
             let conflicting_clauses = self.async_runtime.block_on(
-                Encoder::new(&mut self.state, &self.cache, root_deps, level)
-                    .encode_with_deferred(solvable_ids.iter().copied(), deferred_to_encode),
+                Encoder::new(
+                    &mut self.state,
+                    &self.cache,
+                    root_deps,
+                    level,
+                    self.future_queue_mode,
+                )
+                .encode_with_deferred(solvable_ids.iter().copied(), deferred_to_encode),
             )?;
             #[cfg(feature = "diagnostics")]
             {
