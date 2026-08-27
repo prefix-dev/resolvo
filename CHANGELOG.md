@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.12.0...resolvo-v0.12.1) - 2026-08-27
+
+### Other
+
+- bump rand from 0.9.3 to 0.10.2 ([#282](https://github.com/prefix-dev/resolvo/pull/282))
+- bump chumsky from 0.10.1 to 0.13.0 ([#281](https://github.com/prefix-dev/resolvo/pull/281))
+- avoid boxing provider futures for the default runtime ([#290](https://github.com/prefix-dev/resolvo/pull/290))
+- bypass try_join_all for single requirements ([#289](https://github.com/prefix-dev/resolvo/pull/289))
+- use native words in IndexedSet and hoist forbid-name lookup ([#288](https://github.com/prefix-dev/resolvo/pull/288))
+- bump clap from 4.5.60 to 4.6.6 ([#278](https://github.com/prefix-dev/resolvo/pull/278))
+- bump tracing-subscriber from 0.3.20 to 0.3.23 ([#285](https://github.com/prefix-dev/resolvo/pull/285))
+- bump cbindgen from 0.29.0 to 0.29.4 ([#286](https://github.com/prefix-dev/resolvo/pull/286))
+- bump serde_json from 1.0.141 to 1.0.151 ([#287](https://github.com/prefix-dev/resolvo/pull/287))
+- bump futures from 0.3.31 to 0.3.34 ([#283](https://github.com/prefix-dev/resolvo/pull/283))
+- bump anyhow from 1.0.98 to 1.0.104 ([#284](https://github.com/prefix-dev/resolvo/pull/284))
+- bump async-std from 1.13.1 to 1.13.2 ([#279](https://github.com/prefix-dev/resolvo/pull/279))
+- bump tokio from 1.46.1 to 1.53.1 ([#280](https://github.com/prefix-dev/resolvo/pull/280))
+- bump tracing from 0.1.41 to 0.1.44 ([#277](https://github.com/prefix-dev/resolvo/pull/277))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#274](https://github.com/prefix-dev/resolvo/pull/274))
+- bump proptest from 1.7.0 to 1.11.0 ([#276](https://github.com/prefix-dev/resolvo/pull/276))
+- bump bitvec from 1.0.1 to 1.1.1 ([#275](https://github.com/prefix-dev/resolvo/pull/275))
+- *(ci)* bump prefix-dev/setup-pixi from 0.10.0 to 0.10.1 ([#262](https://github.com/prefix-dev/resolvo/pull/262))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#263](https://github.com/prefix-dev/resolvo/pull/263))
+- bump event-listener from 5.4.0 to 5.4.2 ([#264](https://github.com/prefix-dev/resolvo/pull/264))
+- bump csv from 1.3.1 to 1.4.0 ([#265](https://github.com/prefix-dev/resolvo/pull/265))
+- bump itertools from 0.14.0 to 0.15.0 ([#266](https://github.com/prefix-dev/resolvo/pull/266))
+- bump console from 0.16.0 to 0.16.4 ([#267](https://github.com/prefix-dev/resolvo/pull/267))
+- bump version-ranges from 0.1.1 to 0.1.3 ([#268](https://github.com/prefix-dev/resolvo/pull/268))
+- bump indexmap from 2.10.0 to 2.14.0 ([#270](https://github.com/prefix-dev/resolvo/pull/270))
+- bump clap from 4.5.41 to 4.5.60 ([#271](https://github.com/prefix-dev/resolvo/pull/271))
+- bump petgraph from 0.8.2 to 0.8.3 ([#273](https://github.com/prefix-dev/resolvo/pull/273))
+- bump tracing-test from 0.2.5 to 0.2.6 ([#269](https://github.com/prefix-dev/resolvo/pull/269))
+- bump insta from 1.43.1 to 1.48.0 ([#272](https://github.com/prefix-dev/resolvo/pull/272))
+- bump slab from 0.4.10 to 0.4.12 ([#261](https://github.com/prefix-dev/resolvo/pull/261))
+- bump rand from 0.9.2 to 0.9.3 ([#260](https://github.com/prefix-dev/resolvo/pull/260))
+- bump tracing-subscriber from 0.3.19 to 0.3.20 ([#259](https://github.com/prefix-dev/resolvo/pull/259))
+- Convert rust-toolchain to TOML format
+- *(ci)* bump actions/checkout from 7.0.0 to 7.0.1 ([#257](https://github.com/prefix-dev/resolvo/pull/257))
+
 ## [0.12.0](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.11.1...resolvo-v0.12.0) - 2026-07-24
 
 ### Added
