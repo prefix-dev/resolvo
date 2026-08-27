@@ -17,6 +17,7 @@ fn format_required_by(provider: &BundleBoxProvider, required_by: &RequiredBy) ->
         RequiredBy::Solvable(solvable) => {
             format!("required by {}", provider.display_solvable(*solvable))
         }
+        _ => "required by an unsupported source".to_string(),
     }
 }
 
@@ -40,12 +41,13 @@ fn format_hint(provider: &BundleBoxProvider, hint: &ConflictHint) -> String {
             provider.display_merged_solvables(available),
         ),
         ConflictHint::AllCandidatesExcluded {
-            name,
+            requirement,
             reasons,
             required_by,
+            ..
         } => format!(
-            "Every candidate for '{}' is excluded, {}: {}.",
-            provider.display_name(*name),
+            "Every candidate matching '{}' is excluded, {}: {}.",
+            requirement.display(provider),
             format_required_by(provider, required_by),
             reasons
                 .iter()
@@ -70,6 +72,7 @@ fn format_hint(provider: &BundleBoxProvider, hint: &ConflictHint) -> String {
             "{} is locked, but another version is required.",
             provider.display_solvable(*locked)
         ),
+        _ => "An unsupported conflict hint was returned.".to_string(),
     }
 }
 
@@ -133,7 +136,17 @@ fn test_no_matching_version_transitive() {
 fn test_all_candidates_excluded_top_level() {
     let mut provider = BundleBoxProvider::from_packages(&[("a", 1, vec![])]);
     provider.exclude("a", 1, "not available on this platform");
-    insta::assert_snapshot!(solve_unsat_hints(provider, &["a"]), @"Every candidate for 'a' is excluded, requested by the user: not available on this platform.");
+    insta::assert_snapshot!(solve_unsat_hints(provider, &["a"]), @"Every candidate matching 'a *' is excluded, requested by the user: not available on this platform.");
+}
+
+/// A matching range can be unavailable even when other versions of the package
+/// remain available. The hint must identify the failed range rather than imply
+/// that every version of the package is excluded.
+#[test]
+fn test_all_candidates_excluded_for_matching_range() {
+    let mut provider = BundleBoxProvider::from_packages(&[("a", 1, vec![]), ("a", 2, vec![])]);
+    provider.exclude("a", 1, "not available on this platform");
+    insta::assert_snapshot!(solve_unsat_hints(provider, &["a 1..2"]), @"Every candidate matching 'a >=1, <2' is excluded, requested by the user: not available on this platform.");
 }
 
 /// A dependency whose only candidate is excluded.
@@ -141,7 +154,7 @@ fn test_all_candidates_excluded_top_level() {
 fn test_all_candidates_excluded_transitive() {
     let mut provider = BundleBoxProvider::from_packages(&[("a", 1, vec!["b"]), ("b", 1, vec![])]);
     provider.exclude("b", 1, "not available on this platform");
-    insta::assert_snapshot!(solve_unsat_hints(provider, &["a"]), @"Every candidate for 'b' is excluded, required by a=1: not available on this platform.");
+    insta::assert_snapshot!(solve_unsat_hints(provider, &["a"]), @"Every candidate matching 'b *' is excluded, required by a=1: not available on this platform.");
 }
 
 /// Two packages each requiring an incompatible version of a shared dependency.

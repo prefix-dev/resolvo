@@ -396,14 +396,19 @@ impl Conflict {
         DisplayUnsat::new(graph, solver.provider())
     }
 
-    /// Returns structured, machine-actionable hints describing the causes of
-    /// the conflict.
+    /// Returns high-level, machine-actionable summaries of the conflict.
     ///
-    /// This is the data counterpart of [`Conflict::display_user_friendly`],
-    /// which renders the same causes as a human readable tree. Callers can act
-    /// on the hints programmatically, for example to suggest a correction for a
-    /// misspelled package name or to report that a package is not available for
-    /// the current platform.
+    /// Hints are derived from the conflict graph and are intended for user
+    /// interfaces that need to suggest a correction for a misspelled package
+    /// name or explain a platform exclusion. They are not a complete or minimal
+    /// representation of the conflict graph, nor do they correspond one-to-one
+    /// with its nodes or clauses. Use [`Conflict::graph`] when those
+    /// relationships are required.
+    ///
+    /// Equivalent summaries may be coalesced. Hints for top-level requirements
+    /// are returned before transitive hints; the order of other hints is not a
+    /// compatibility guarantee. Constructing the graph may access metadata
+    /// through the solver's cached provider.
     ///
     /// Hints reference packages, versions and version sets by their interned
     /// ids; resolve them through the [`Interner`] of the provider.
@@ -499,6 +504,8 @@ impl Conflict {
                                     &mut hints,
                                     ConflictHint::AllCandidatesExcluded {
                                         name,
+                                        requirement,
+                                        version_set,
                                         reasons,
                                         required_by,
                                     },
@@ -567,6 +574,8 @@ fn classify_missing<D: DependencyProvider, RT: AsyncRuntime>(
                 .collect();
             return ConflictHint::AllCandidatesExcluded {
                 name,
+                requirement,
+                version_set,
                 reasons,
                 required_by,
             };
@@ -708,6 +717,9 @@ pub enum ConflictCause<S = SolvableId> {
 }
 
 /// Identifies what introduced a requirement reported in a [`ConflictHint`].
+///
+/// Additional sources may be added in future releases.
+#[non_exhaustive]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RequiredBy<S = SolvableId> {
     /// The requirement is a top-level requirement of the [`Problem`] itself.
@@ -723,6 +735,9 @@ pub enum RequiredBy<S = SolvableId> {
 ///
 /// All packages, versions and version sets are referenced by their interned
 /// ids. Resolve them through the [`Interner`] of the provider.
+///
+/// Additional hint kinds may be added in future releases.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ConflictHint<N = NameId, S = SolvableId> {
     /// A required package has no candidates at all: the name is unknown to the
@@ -746,12 +761,16 @@ pub enum ConflictHint<N = NameId, S = SolvableId> {
         /// What introduced the requirement.
         required_by: RequiredBy<S>,
     },
-    /// The package has candidates matching the requested range, but all of them
-    /// were excluded, for example because they are not compatible with the
-    /// current platform.
+    /// Every candidate matching a requested version set was excluded, for
+    /// example because it is not compatible with the current platform.
     AllCandidatesExcluded {
         /// The name of the excluded package.
         name: N,
+        /// The original requirement containing the failed version set.
+        requirement: Requirement,
+        /// The specific version-set alternative for which every candidate was
+        /// excluded. This disambiguates alternatives in union requirements.
+        version_set: VersionSetId,
         /// The reasons the matching candidates were excluded.
         reasons: Vec<StringId>,
         /// What introduced the requirement.
