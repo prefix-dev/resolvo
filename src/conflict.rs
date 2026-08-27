@@ -396,22 +396,30 @@ impl Conflict {
         DisplayUnsat::new(graph, solver.provider())
     }
 
-    /// Returns high-level, machine-actionable summaries of the conflict.
+    /// Returns UI-oriented summaries of this conflict.
     ///
-    /// Hints are derived from the conflict graph and are intended for user
-    /// interfaces that need to suggest a correction for a misspelled package
-    /// name or explain a platform exclusion. They are not a complete or minimal
-    /// representation of the conflict graph, nor do they correspond one-to-one
-    /// with its nodes or clauses. Use [`Conflict::graph`] when those
-    /// relationships are required.
+    /// Use hints for concise explanations or recovery suggestions. Use
+    /// [`Conflict::graph`] when the caller needs the full causal graph.
     ///
-    /// Equivalent summaries may be coalesced. Hints for top-level requirements
-    /// are returned before transitive hints; the order of other hints is not a
-    /// compatibility guarantee. Constructing the graph may access metadata
-    /// through the solver's cached provider.
+    /// Equal hints are coalesced. Hints for direct problem requirements come
+    /// first; the remaining order is unspecified. This reconstructs the
+    /// conflict graph and may query candidate metadata through the provider.
     ///
-    /// Hints reference packages, versions and version sets by their interned
-    /// ids; resolve them through the [`Interner`] of the provider.
+    /// IDs are owned by the provider. Resolve them with [`Interner`]:
+    ///
+    /// ```
+    /// # use resolvo::{Interner, conflict::ConflictHint};
+    /// # fn describe<I: Interner>(provider: &I, hint: &ConflictHint<I::NameId, I::SolvableId>) -> String {
+    /// match hint {
+    ///     ConflictHint::PackageUnavailable { name, .. } => {
+    ///         format!("unknown package: {}", provider.display_name(*name))
+    ///     }
+    ///     ConflictHint::AllCandidatesExcluded { requirement, .. } => {
+    ///         format!("no usable candidate for {}", requirement.display(provider))
+    ///     }
+    ///     _ => "resolution failed".to_string(),
+    /// }
+    /// # }
     pub fn hints<D: DependencyProvider, RT: AsyncRuntime>(
         &self,
         solver: &Solver<D, RT>,
@@ -716,84 +724,75 @@ pub enum ConflictCause<S = SolvableId> {
     Excluded,
 }
 
-/// Identifies what introduced a requirement reported in a [`ConflictHint`].
+/// Origin of a requirement reported by a [`ConflictHint`].
 ///
-/// Additional sources may be added in future releases.
+/// Match this enum with a fallback arm: new origins may be added.
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RequiredBy<S = SolvableId> {
-    /// The requirement is a top-level requirement of the [`Problem`] itself.
+    /// A direct requirement of the [`Problem`].
     ///
     /// [`Problem`]: crate::Problem
     Problem,
-    /// The requirement is a dependency of the given solvable.
+    /// A dependency declared by this solvable.
     Solvable(S),
 }
 
-/// A structured, machine-actionable explanation of a single cause of an
-/// unsatisfiable solve, returned by [`Conflict::hints`].
+/// A summary returned by [`Conflict::hints`].
 ///
-/// All packages, versions and version sets are referenced by their interned
-/// ids. Resolve them through the [`Interner`] of the provider.
-///
-/// Additional hint kinds may be added in future releases.
+/// Each variant describes one user-facing cause. The IDs use the provider's
+/// types. Match with a fallback arm: new hint kinds may be added.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ConflictHint<N = NameId, S = SolvableId> {
-    /// A required package has no candidates at all: the name is unknown to the
-    /// provider. This commonly indicates a misspelled package name or a missing
-    /// channel.
+    /// No candidate exists for the requested package name.
     PackageUnavailable {
-        /// The name of the package that could not be found.
+        /// Missing package name.
         name: N,
-        /// The requirement that asked for the package.
+        /// Requirement that named the package.
         requirement: Requirement,
-        /// What introduced the requirement.
+        /// Source of the requirement.
         required_by: RequiredBy<S>,
     },
-    /// The package exists but none of its versions match the requested version
-    /// range.
+    /// Candidates exist, but none satisfies the requirement.
     NoMatchingVersion {
-        /// The requirement that could not be satisfied.
+        /// Unsatisfied requirement.
         requirement: Requirement,
-        /// The candidates that exist for the package, none of which match.
+        /// All non-excluded candidates for its package.
         available: Vec<S>,
-        /// What introduced the requirement.
+        /// Source of the requirement.
         required_by: RequiredBy<S>,
     },
-    /// Every candidate matching a requested version set was excluded, for
-    /// example because it is not compatible with the current platform.
+    /// Every candidate for one requested version set is excluded.
     AllCandidatesExcluded {
-        /// The name of the excluded package.
+        /// Excluded package name.
         name: N,
-        /// The original requirement containing the failed version set.
+        /// Requirement containing the failed version set.
         requirement: Requirement,
-        /// The specific version-set alternative for which every candidate was
-        /// excluded. This disambiguates alternatives in union requirements.
+        /// Failed alternative within `requirement`.
         version_set: VersionSetId,
-        /// The reasons the matching candidates were excluded.
+        /// Reasons attached to matching excluded candidates.
         reasons: Vec<StringId>,
-        /// What introduced the requirement.
+        /// Source of the requirement.
         required_by: RequiredBy<S>,
     },
-    /// Multiple incompatible versions of the same package are required at the
-    /// same time and cannot be installed together.
+    /// Incompatible solvables of one package are required together.
     IncompatibleRequests {
-        /// The name of the package required in incompatible versions.
+        /// Shared package name.
         name: N,
-        /// The conflicting candidates involved.
+        /// Incompatible solvables.
         solvables: Vec<S>,
     },
-    /// A run constraint imposed by a package cannot be fulfilled.
+    /// A solvable's run constraint cannot be satisfied.
     Constrained {
-        /// The version set the dependency is constrained to.
+        /// Version set prohibited by the constraint.
         constraint: VersionSetId,
-        /// The solvable that imposes the constraint.
+        /// Solvable that imposed the constraint.
         constrained_by: S,
     },
-    /// A locked package conflicts with the versions required by the request.
+    /// A locked solvable conflicts with another requirement.
     Locked {
-        /// The locked solvable.
+        /// Locked solvable.
         locked: S,
     },
 }
