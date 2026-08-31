@@ -2201,6 +2201,103 @@ mod test_self_conflict {
         lib=1
         ");
     }
+
+    /// Multiple self-conflicting providers of the SAME capability, enough of
+    /// them (>= CONSTRAINS_AUX_ENCODING_THRESHOLD == 4) to trigger the shared
+    /// aux-variable constrains encoding. This mirrors the real CentOS case:
+    /// several versions of centos-stream-release each provide AND conflict
+    /// with `system-release`. Installing any one of them should succeed (it
+    /// just excludes the OTHER providers). The `100..200` range matches none of
+    /// the existing versions, so every version is a non-matching (forbidden)
+    /// candidate of its own constraint, i.e. a self-conflict.
+    #[test]
+    fn test_self_conflict_multiple_providers() {
+        let mut provider = BundleBoxProvider::new();
+        for v in 1..=5u32 {
+            provider.add_package("a", v.into(), &[], &["a 100..200"]);
+        }
+
+        let requirements = provider.requirements(&["a"]);
+        let config = SolverConfig {
+            forbid_self_conflicts: false,
+        };
+        let mut solver = Solver::new(provider).with_config(config);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).expect("should be solvable");
+        let result = transaction_to_string(solver.provider(), &solved);
+        // Exactly one version of "a" should be installed.
+        assert_snapshot!(result, @"a=5");
+    }
+
+    /// Same shape as above (shared aux encoding), but the highest version —
+    /// which builds the shared aux variable — is unsatisfiable, forcing the
+    /// solver to fall back to a lower self-conflicting provider that reuses the
+    /// aux var. Regression test: the shared aux definition must cover *all*
+    /// candidates so the fallback provider is not spuriously uninstallable.
+    #[test]
+    fn test_self_conflict_multiple_providers_fallback() {
+        let mut provider = BundleBoxProvider::new();
+        // a=5 pulls in a missing dependency, so it cannot be installed, but the
+        // solver considers it first (highest version) and builds the aux var.
+        provider.add_package("a", 5.into(), &["missing"], &["a 100..200"]);
+        for v in 1..=4u32 {
+            provider.add_package("a", v.into(), &[], &["a 100..200"]);
+        }
+
+        let requirements = provider.requirements(&["a"]);
+        let config = SolverConfig {
+            forbid_self_conflicts: false,
+        };
+        let mut solver = Solver::new(provider).with_config(config);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).expect("should fall back to a=4");
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @"a=4");
+    }
+
+    /// Control for the above: identical fallback shape but only 3 providers
+    /// (< threshold), so the pairwise encoding is used instead of the shared
+    /// aux variable. This path was already correct; guard against regressions.
+    #[test]
+    fn test_self_conflict_pairwise_fallback() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("a", 3.into(), &["missing"], &["a 100..200"]);
+        for v in 1..=2u32 {
+            provider.add_package("a", v.into(), &[], &["a 100..200"]);
+        }
+
+        let requirements = provider.requirements(&["a"]);
+        let config = SolverConfig {
+            forbid_self_conflicts: false,
+        };
+        let mut solver = Solver::new(provider).with_config(config);
+        let problem = Problem::new().requirements(requirements);
+        let solved = solver.solve(problem).expect("should fall back to a=2");
+        let result = transaction_to_string(solver.provider(), &solved);
+        assert_snapshot!(result, @"a=2");
+    }
+
+    /// With `forbid_self_conflicts` (the default), multiple self-conflicting
+    /// providers on the shared-aux path are ALL uninstallable, so the whole
+    /// solve is unsat.
+    #[test]
+    fn test_self_conflict_multiple_providers_forbidden() {
+        let mut provider = BundleBoxProvider::new();
+        for v in 1..=5u32 {
+            provider.add_package("a", v.into(), &[], &["a 100..200"]);
+        }
+
+        let requirements = provider.requirements(&["a"]);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(requirements);
+        match solver.solve(problem) {
+            Ok(_) => panic!("expected unsat: all providers self-conflict"),
+            Err(UnsolvableOrCancelled::Unsolvable(_)) => {}
+            Err(UnsolvableOrCancelled::Cancelled(_)) => {
+                panic!("expected unsolvable, not cancelled")
+            }
+        }
+    }
 }
 
 // ============================================================================

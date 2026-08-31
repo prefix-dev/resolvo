@@ -700,36 +700,33 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
         let variable = self.state.variable_map.intern_solvable_or_root(solvable_id);
 
+        // Whether the constraining solvable is itself one of the forbidden
+        // (non-matching) candidates: i.e. it conflicts with a capability it
+        // also provides (a self-conflict).
+        let self_conflict = candidates
+            .iter()
+            .any(|&c| SolvableIdOrRoot::from(c) == solvable_id);
+
         if candidates.len() < CONSTRAINS_AUX_ENCODING_THRESHOLD {
             // Pairwise encoding: one (¬parent ∨ ¬candidate) clause per
-            // excluded candidate.
-            for &forbidden_candidate in candidates {
-                if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
-                    if self.config.forbid_self_conflicts {
-                        self.add_self_conflict_clause(variable, constraint);
-                    }
-                    continue;
-                }
-                let forbidden_candidate_var =
-                    self.state.variable_map.intern_solvable(forbidden_candidate);
-                let (watched_literals, conflict, kind) = WatchedLiterals::constrains(
-                    variable,
-                    forbidden_candidate_var,
-                    constraint,
-                    &self.state.decision_tracker,
-                );
-
-                let clause_id = self.state.add_clause(watched_literals, kind);
-
-                if conflict {
-                    self.conflicting_clauses.push(clause_id);
-                }
+            // excluded candidate, skipping the parent itself.
+            self.add_constrains_pairwise_for_parent(variable, solvable_id, constraint, candidates);
+            if self_conflict && self.config.forbid_self_conflicts {
+                self.add_self_conflict_clause(variable, constraint);
             }
             return;
         }
 
         // Shared encoding: the (¬candidate ∨ aux) clauses are emitted once per
-        // version set, each parent only adds a single (¬parent ∨ ¬aux) clause.
+        // version set, each non-self parent only adds a single (¬parent ∨ ¬aux)
+        // clause.
+        //
+        // The aux variable means "some forbidden candidate of this constraint
+        // is installed" and MUST be defined over *all* candidates, so its
+        // meaning does not depend on which parent happens to build it. Skipping
+        // a candidate here (e.g. a self-conflicting parent) would both leave
+        // that candidate un-forbidden for every *other* parent and make every
+        // other self-conflicting provider that reuses the aux uninstallable.
         let aux_variable = match self.state.constrains_aux_vars.get(&constraint) {
             Some(&aux_variable) => aux_variable,
             None => {
@@ -742,12 +739,6 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     .insert(constraint, aux_variable);
 
                 for &forbidden_candidate in candidates {
-                    if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
-                        if self.config.forbid_self_conflicts {
-                            self.add_self_conflict_clause(variable, constraint);
-                        }
-                        continue;
-                    }
                     let forbidden_candidate_var =
                         self.state.variable_map.intern_solvable(forbidden_candidate);
                     let (watched_literals, kind) = WatchedLiterals::constrains_excluded(
@@ -780,6 +771,25 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             }
         };
 
+        // A self-conflicting parent is itself part of the aux definition
+        // (parent -> aux), so the shared (parent -> ¬aux) clause would make it
+        // uninstallable. Encode such a parent pairwise instead (forbidding the
+        // other providers but not itself), or, if self-conflicts are forbidden,
+        // mark it uninstallable directly.
+        if self_conflict {
+            if self.config.forbid_self_conflicts {
+                self.add_self_conflict_clause(variable, constraint);
+            } else {
+                self.add_constrains_pairwise_for_parent(
+                    variable,
+                    solvable_id,
+                    constraint,
+                    candidates,
+                );
+            }
+            return;
+        }
+
         let (watched_literals, conflict, kind) = WatchedLiterals::constrains_parent(
             variable,
             aux_variable,
@@ -789,6 +799,36 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         let clause_id = self.state.add_clause(watched_literals, kind);
         if conflict {
             self.conflicting_clauses.push(clause_id);
+        }
+    }
+
+    /// Emits the pairwise constrains clauses `(¬parent ∨ ¬candidate)` for a
+    /// single parent, skipping the parent itself (a self-conflict).
+    fn add_constrains_pairwise_for_parent(
+        &mut self,
+        variable: VariableId,
+        solvable_id: SolvableIdOrRoot<D::SolvableId>,
+        constraint: VersionSetId,
+        candidates: &[D::SolvableId],
+    ) {
+        for &forbidden_candidate in candidates {
+            if SolvableIdOrRoot::from(forbidden_candidate) == solvable_id {
+                continue;
+            }
+            let forbidden_candidate_var =
+                self.state.variable_map.intern_solvable(forbidden_candidate);
+            let (watched_literals, conflict, kind) = WatchedLiterals::constrains(
+                variable,
+                forbidden_candidate_var,
+                constraint,
+                &self.state.decision_tracker,
+            );
+
+            let clause_id = self.state.add_clause(watched_literals, kind);
+
+            if conflict {
+                self.conflicting_clauses.push(clause_id);
+            }
         }
     }
 
