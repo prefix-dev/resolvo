@@ -2544,6 +2544,13 @@ mod allow_multiple_versions {
 
 mod forbid_registration_regression {
     use super::*;
+    use resolvo::{
+        DenseIndex, KnownDependencies, NameId,
+        snapshot::{
+            DependencySnapshot, Package as SnapshotPackage, SnapshotProvider,
+            Solvable as SnapshotSolvable, VersionSet as SnapshotVersionSet,
+        },
+    };
 
     /// Solves a simple provider built from `packages` for the given root specs
     /// and returns the sorted transaction string.
@@ -2695,5 +2702,100 @@ mod forbid_registration_regression {
     multi=1
     multi=3
     ");
+    }
+
+    /// A version set can represent a virtual capability provided by multiple
+    /// concrete package names. Forbid-multiple clauses must be grouped by each
+    /// solvable's concrete name, not by the first candidate in the version set.
+    #[test]
+    fn test_virtual_package_candidates_can_have_different_names() {
+        let virtual_name = NameId::from_index(0);
+        let package_a = NameId::from_index(1);
+        let package_b = NameId::from_index(2);
+        let solvable_a = SolvableId::from_index(0);
+        let solvable_b = SolvableId::from_index(1);
+        let virtual_set = VersionSetId::from_index(0);
+        let package_a_set = VersionSetId::from_index(1);
+        let package_b_set = VersionSetId::from_index(2);
+
+        let mut snapshot = DependencySnapshot::default();
+        snapshot.solvables.insert(
+            solvable_a,
+            SnapshotSolvable {
+                display: "package-a=1".to_owned(),
+                name: package_a,
+                order: 0,
+                dependencies: resolvo::Dependencies::Known(KnownDependencies::default()),
+                hint_dependencies_available: false,
+            },
+        );
+        snapshot.solvables.insert(
+            solvable_b,
+            SnapshotSolvable {
+                display: "package-b=1".to_owned(),
+                name: package_b,
+                order: 0,
+                dependencies: resolvo::Dependencies::Known(KnownDependencies::default()),
+                hint_dependencies_available: false,
+            },
+        );
+
+        for (name, display, solvables) in [
+            (virtual_name, "virtual", vec![solvable_a, solvable_b]),
+            (package_a, "package-a", vec![solvable_a]),
+            (package_b, "package-b", vec![solvable_b]),
+        ] {
+            snapshot.packages.insert(
+                name,
+                SnapshotPackage {
+                    name: display.to_owned(),
+                    solvables,
+                    excluded: Vec::new(),
+                },
+            );
+        }
+
+        for (id, name, display, matching_candidates) in [
+            (
+                virtual_set,
+                virtual_name,
+                "*",
+                [solvable_a, solvable_b].into_iter().collect(),
+            ),
+            (
+                package_a_set,
+                package_a,
+                "*",
+                [solvable_a].into_iter().collect(),
+            ),
+            (
+                package_b_set,
+                package_b,
+                "*",
+                [solvable_b].into_iter().collect(),
+            ),
+        ] {
+            snapshot.version_sets.insert(
+                id,
+                SnapshotVersionSet {
+                    name,
+                    display: display.to_owned(),
+                    matching_candidates,
+                },
+            );
+        }
+
+        let provider = SnapshotProvider::new(&snapshot);
+        let mut solver = Solver::new(provider);
+        let problem = Problem::new().requirements(vec![
+            virtual_set.into(),
+            package_a_set.into(),
+            package_b_set.into(),
+        ]);
+        let solved = solver.solve(problem).unwrap();
+
+        assert_eq!(solved.len(), 2);
+        assert!(solved.contains(&solvable_a));
+        assert!(solved.contains(&solvable_b));
     }
 }
