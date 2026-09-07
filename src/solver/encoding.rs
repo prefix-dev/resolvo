@@ -438,19 +438,27 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 continue;
             };
             let name_id = self.cache.provider().solvable_name(first_solvable);
-            debug_assert!(
-                candidates
-                    .iter()
-                    .all(|&solvable| self.cache.provider().solvable_name(solvable) == name_id),
-                "all candidates in a version set must have the same package name"
-            );
-            if self.state.allow_multiple_names.contains(name_id) {
-                continue;
-            }
-            let pending = self.pending_forbid_clauses.entry(name_id).or_default();
-            for &variable_id in variables {
-                if self.forbid_seen.insert(variable_id) {
-                    pending.push(variable_id);
+
+            // Version sets for virtual capabilities can contain solvables with
+            // different concrete package names.
+            if candidates
+                .iter()
+                .skip(1)
+                .all(|&solvable| self.cache.provider().solvable_name(solvable) == name_id)
+            {
+                if self.state.allow_multiple_names.contains(name_id) {
+                    continue;
+                }
+                let pending = self.pending_forbid_clauses.entry(name_id).or_default();
+                for &variable_id in variables {
+                    if self.forbid_seen.insert(variable_id) {
+                        pending.push(variable_id);
+                    }
+                }
+            } else {
+                for (&solvable, &variable_id) in candidates.iter().zip(variables) {
+                    let name_id = self.cache.provider().solvable_name(solvable);
+                    self.register_forbid_target(name_id, variable_id);
                 }
             }
         }
