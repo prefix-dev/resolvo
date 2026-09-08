@@ -176,6 +176,23 @@ impl<N> Clauses<N> {
 
 type RequirementCandidateVariables = Vec<Vec<VariableId>>;
 
+/// Configuration options for the solver.
+#[derive(Debug, Clone)]
+pub struct SolverConfig {
+    /// When `true`, a package that conflicts with something it also provides
+    /// (i.e. it conflicts with itself) is marked uninstallable. When `false`,
+    /// self-conflicts are silently ignored.
+    pub forbid_self_conflicts: bool,
+}
+
+impl Default for SolverConfig {
+    fn default() -> Self {
+        Self {
+            forbid_self_conflicts: true,
+        }
+    }
+}
+
 /// Drives the SAT solving process.
 pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
     /// The runtime to use for async operations.
@@ -190,6 +207,9 @@ pub struct Solver<D: DependencyProvider, RT: AsyncRuntime = NowOrNeverRuntime> {
     /// Determines whether encoder futures may be polled later. Kept private so every custom
     /// runtime remains pending-capable without extending the public runtime contract.
     future_queue_mode: FutureQueueMode,
+
+    /// Solver configuration options.
+    config: SolverConfig,
 
     /// The activity add factor. This is a value that is added to the activity
     /// score of each package that is part of a conflict.
@@ -372,11 +392,13 @@ impl<D: DependencyProvider> Solver<D, NowOrNeverRuntime> {
     /// Creates a single threaded block solver, using the provided
     /// [`DependencyProvider`].
     pub fn new(provider: D) -> Self {
+        let config = provider.solver_config();
         Self {
             cache: SolverCache::new(provider),
             async_runtime: NowOrNeverRuntime,
             state: SolverState::default(),
             future_queue_mode: FutureQueueMode::Immediate,
+            config,
             activity_add: 1.0,
             activity_decay: 0.95,
         }
@@ -454,6 +476,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             cache: self.cache,
             state: self.state,
             future_queue_mode: FutureQueueMode::PendingCapable,
+            config: self.config,
             activity_decay: self.activity_decay,
             activity_add: self.activity_add,
         }
@@ -468,6 +491,12 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
             activity_decay: decay,
             ..self
         }
+    }
+
+    /// Set the solver configuration.
+    #[must_use]
+    pub fn with_config(self, config: SolverConfig) -> Self {
+        Self { config, ..self }
     }
 
     /// Solves the given [`Problem`].
@@ -643,6 +672,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                     Encoder::new(
                         &mut self.state,
                         &self.cache,
+                        &self.config,
                         root_deps,
                         level,
                         self.future_queue_mode,
@@ -804,6 +834,7 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
                 Encoder::new(
                     &mut self.state,
                     &self.cache,
+                    &self.config,
                     root_deps,
                     level,
                     self.future_queue_mode,
