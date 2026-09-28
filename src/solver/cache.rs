@@ -160,6 +160,16 @@ impl<D: DependencyProvider> SolverCache<D> {
         Ok(&self.candidates[candidates_id])
     }
 
+    /// Returns the candidates of a package if they have already been fetched
+    /// from the [`DependencyProvider`].
+    pub(crate) fn cached_candidates(
+        &self,
+        package_name: D::NameId,
+    ) -> Option<&Candidates<D::SolvableId>> {
+        let candidates_id = self.package_name_to_candidates.get(package_name)?;
+        Some(&self.candidates[candidates_id])
+    }
+
     /// Returns the candidates of a package that match the specified version
     /// set.
     ///

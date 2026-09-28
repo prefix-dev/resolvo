@@ -19,6 +19,11 @@
 //!   [`DecideQueue::next_decision`] proves them ineligible, and every
 //!   assignment change that can make an unqueued clause eligible re-inserts
 //!   it through occurrence lists (see [`DecideQueue::sync`]).
+//! - [`DecideQueue::next_decision`] first decides eligible clauses whose
+//!   first candidate is *favored* (see [`crate::Candidates::favored`]), so a
+//!   favored candidate is kept unless an earlier decision already ruled it
+//!   out, regardless of requirement order. Such clauses are mirrored in
+//!   [`DecideQueue::favored_queue`].
 //! - [`DecideQueue::next_decision`] selects among the eligible clauses: it
 //!   takes the first eligible clause by position as the initial best and
 //!   then considers only the *hot* clauses after it. A clause replaces the
@@ -87,6 +92,9 @@ struct TrackedClause {
     /// [`DecideQueue::next_decision`]; cold clauses have package activity
     /// exactly zero.
     hot: bool,
+    /// The requirement's first candidate, if it is favored (see
+    /// [`crate::Candidates::favored`]).
+    favored: Option<VariableId>,
 }
 
 /// The cached result of walking a requirement's sorted candidate lists.
@@ -162,6 +170,13 @@ pub(crate) struct DecideQueue<D: DependencyProvider> {
     queue: BTreeMap<ClausePosition, TrackedClauseId>,
     /// The subset of `queue` whose clauses are hot, maintained in lockstep.
     hot_queue: BTreeMap<ClausePosition, TrackedClauseId>,
+    /// Queued clauses with a favored first candidate. Clauses whose favored
+    /// candidate got assigned are dropped lazily by
+    /// [`Self::next_favored_decision`].
+    favored_queue: BTreeMap<ClausePosition, TrackedClauseId>,
+    /// Favored candidate -> clauses, used to put them back into
+    /// `favored_queue` when the candidate is unassigned again.
+    clauses_by_favored: HashMap<VariableId, Vec<TrackedClauseId>>,
 
     /// Names whose activity was ever bumped. Never shrinks: decay can bring
     /// an activity back to zero, which only makes the hot set a conservative
@@ -208,6 +223,8 @@ impl<D: DependencyProvider> Default for DecideQueue<D> {
             clauses_by_parent: Vec::new(),
             queue: BTreeMap::new(),
             hot_queue: BTreeMap::new(),
+            favored_queue: BTreeMap::new(),
+            clauses_by_favored: HashMap::default(),
             hot_names: Default::default(),
             clauses_by_name: HashMap::default(),
             requirements_by_candidate: HashMap::default(),
@@ -222,13 +239,14 @@ impl<D: DependencyProvider> Default for DecideQueue<D> {
     }
 }
 
-/// Inserts a clause into the queue (and the hot queue if it is hot), unless
-/// its parent is not currently assigned true. Filtering on the parent here
-/// keeps the constant churn of candidate variables being forbidden from ever
-/// touching the queue.
+/// Inserts a clause into the queue (and the hot and favored queues if it is
+/// hot or favored), unless its parent is not currently assigned true.
+/// Filtering on the parent here keeps the constant churn of candidate
+/// variables being forbidden from ever touching the queue.
 fn enqueue_clause(
     queue: &mut BTreeMap<ClausePosition, TrackedClauseId>,
     hot_queue: &mut BTreeMap<ClausePosition, TrackedClauseId>,
+    favored_queue: &mut BTreeMap<ClausePosition, TrackedClauseId>,
     clauses: &[TrackedClause],
     map: &DecisionMap,
     id: TrackedClauseId,
@@ -240,6 +258,9 @@ fn enqueue_clause(
     queue.insert(clause.position, id);
     if clause.hot {
         hot_queue.insert(clause.position, id);
+    }
+    if clause.favored.is_some() {
+        favored_queue.insert(clause.position, id);
     }
 }
 
@@ -260,8 +281,9 @@ impl<D: DependencyProvider> DecideQueue<D> {
         condition: Option<DisjunctionId>,
         clause_id: ClauseId,
         names: impl IntoIterator<Item = D::NameId>,
+        favored: Option<VariableId>,
         disjunctions: &Arena<DisjunctionId, Disjunction>,
-        parent_value: Option<bool>,
+        map: &DecisionMap,
     ) {
         let parent_pos = *self.parent_positions.entry(parent).or_insert_with(|| {
             self.clauses_by_parent.push(Vec::new());
@@ -295,6 +317,10 @@ impl<D: DependencyProvider> DecideQueue<D> {
             }
         }
 
+        if let Some(favored) = favored {
+            self.clauses_by_favored.entry(favored).or_default().push(id);
+        }
+
         self.requirement_states
             .get_or_insert_with(requirement, || RequirementEntry {
                 state: RequirementState::Dirty,
@@ -313,14 +339,17 @@ impl<D: DependencyProvider> DecideQueue<D> {
             condition,
             clause_id,
             hot,
+            favored,
         });
 
-        if parent_value == Some(true) {
-            self.queue.insert(position, id);
-            if hot {
-                self.hot_queue.insert(position, id);
-            }
-        }
+        enqueue_clause(
+            &mut self.queue,
+            &mut self.hot_queue,
+            &mut self.favored_queue,
+            &self.clauses,
+            map,
+            id,
+        );
     }
 
     /// Marks a package name as hot (its activity was bumped) and promotes the
@@ -396,6 +425,8 @@ impl<D: DependencyProvider> DecideQueue<D> {
             clauses_by_parent,
             queue,
             hot_queue,
+            favored_queue,
+            clauses_by_favored,
             requirements_by_candidate,
             clauses_by_condition_variable,
             requirement_states,
@@ -410,7 +441,7 @@ impl<D: DependencyProvider> DecideQueue<D> {
         if value == Some(true) {
             if let Some(&parent_pos) = parent_positions.get(&variable) {
                 for &id in &clauses_by_parent[parent_pos as usize] {
-                    enqueue_clause(queue, hot_queue, clauses, map, id);
+                    enqueue_clause(queue, hot_queue, favored_queue, clauses, map, id);
                 }
             }
         }
@@ -439,7 +470,7 @@ impl<D: DependencyProvider> DecideQueue<D> {
                         entry.state = RequirementState::Dirty;
                         if let Some(woken) = clauses_by_requirement.get(requirement) {
                             for &id in woken {
-                                enqueue_clause(queue, hot_queue, clauses, map, id);
+                                enqueue_clause(queue, hot_queue, favored_queue, clauses, map, id);
                             }
                         }
                     }
@@ -451,7 +482,20 @@ impl<D: DependencyProvider> DecideQueue<D> {
         // (in either direction) can complete an all-false condition.
         if let Some(woken) = clauses_by_condition_variable.get(&variable) {
             for &id in woken {
-                enqueue_clause(queue, hot_queue, clauses, map, id);
+                enqueue_clause(queue, hot_queue, favored_queue, clauses, map, id);
+            }
+        }
+
+        // Favored wake-up: an unassigned favored candidate can be decided
+        // again.
+        if value.is_none() {
+            if let Some(ids) = clauses_by_favored.get(&variable) {
+                for &id in ids {
+                    let position = clauses[id as usize].position;
+                    if queue.contains_key(&position) {
+                        favored_queue.insert(position, id);
+                    }
+                }
             }
         }
     }
@@ -589,7 +633,8 @@ impl<D: DependencyProvider> DecideQueue<D> {
     /// later clause replaces it only with strictly higher package activity
     /// and strictly fewer remaining candidates (clauses of the root are
     /// always preferred over the rest). Ineligible clauses reached on the way
-    /// are dequeued, which is what keeps the queue tight.
+    /// are dequeued, which is what keeps the queue tight. Eligible favored
+    /// clauses take precedence, see [`Self::next_favored_decision`].
     ///
     /// `max_activity` must be exactly the largest activity stored in
     /// `name_activity` (it is maintained next to the bumps and decays).
@@ -608,6 +653,16 @@ impl<D: DependencyProvider> DecideQueue<D> {
             activity: f32,
             count: u32,
             decision: (VariableId, VariableId, ClauseId),
+        }
+
+        if let Some(decision) = self.next_favored_decision(
+            map,
+            sorted_candidates,
+            disjunctions,
+            name_activity,
+            provider,
+        ) {
+            return Some(decision);
         }
 
         let hot_only = self.hot_only;
@@ -731,6 +786,55 @@ impl<D: DependencyProvider> DecideQueue<D> {
         })
     }
 
+    /// Decides the first eligible clause in the favored queue. Entries whose
+    /// favored candidate is assigned, or that are ineligible, are dropped on
+    /// the way. The favored candidate is the requirement's first candidate,
+    /// so while it is unassigned it is the frontier of an eligible clause.
+    fn next_favored_decision(
+        &mut self,
+        map: &DecisionMap,
+        sorted_candidates: &RequirementMap<Vec<Vec<VariableId>>>,
+        disjunctions: &Arena<DisjunctionId, Disjunction>,
+        name_activity: &<D::NameId as SolverId>::Map<f32>,
+        provider: &D,
+    ) -> Option<QueueDecision> {
+        while let Some((&position, &id)) = self.favored_queue.first_key_value() {
+            let clause = self.clauses[id as usize];
+            if clause
+                .favored
+                .is_some_and(|favored| map.value(favored).is_some())
+            {
+                self.favored_queue.pop_first();
+                continue;
+            }
+            let Some((candidate, version_set, count)) =
+                self.inspect(clause, map, sorted_candidates, disjunctions, provider)
+            else {
+                self.queue.remove(&position);
+                self.hot_queue.remove(&position);
+                self.favored_queue.pop_first();
+                #[cfg(feature = "diagnostics")]
+                {
+                    self.counters.dequeues += 1;
+                }
+                continue;
+            };
+            debug_assert_eq!(
+                Some(candidate),
+                clause.favored,
+                "the frontier of a queued favored clause is its favored candidate"
+            );
+            return Some(QueueDecision {
+                candidate,
+                required_by: clause.parent,
+                clause_id: clause.clause_id,
+                package_activity: name_activity.get(provider.version_set_name(version_set)),
+                candidate_count: count,
+            });
+        }
+        None
+    }
+
     /// Verifies the heuristic-independent queue invariants. Called on every
     /// `decide()` in debug builds; a violation means a wake-up, cache, or hot
     /// promotion hole, which would otherwise only show up as silently
@@ -794,6 +898,21 @@ impl<D: DependencyProvider> DecideQueue<D> {
                     self.hot_queue.contains_key(&clause.position),
                     "hot queue out of lockstep for clause {id}"
                 );
+            }
+            if let Some(favored) = clause.favored {
+                assert_eq!(
+                    sorted_candidates[clause.requirement]
+                        .first()
+                        .and_then(|candidates| candidates.first()),
+                    Some(&favored),
+                    "clause {id} favored candidate is not its first candidate"
+                );
+                if self.queue.contains_key(&clause.position) && map.value(favored).is_none() {
+                    assert!(
+                        self.favored_queue.contains_key(&clause.position),
+                        "queued favored clause {id} is missing from the favored queue"
+                    );
+                }
             }
         }
 

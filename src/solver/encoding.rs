@@ -522,6 +522,19 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             conditions.push(None);
         }
 
+        // The requirement's first candidate, if it is favored. The package
+        // candidates are always cached before the sorted candidates.
+        let favored = candidates
+            .first()
+            .and_then(|solvables| solvables.first())
+            .filter(|&&first| {
+                let name = self.cache.provider().solvable_name(first);
+                self.cache
+                    .cached_candidates(name)
+                    .is_some_and(|candidates| candidates.favored == Some(first))
+            })
+            .map(|_| version_set_variables[0][0]);
+
         let candidate_count: usize = version_set_variables.iter().map(Vec::len).sum();
 
         for condition in conditions {
@@ -541,7 +554,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 && !variable.is_root()
                 && candidate_count >= REQUIRES_AUX_ENCODING_THRESHOLD
             {
-                self.add_shared_requires(variable, requirement.requirement, &version_set_variables);
+                self.add_shared_requires(
+                    variable,
+                    requirement.requirement,
+                    &version_set_variables,
+                    favored,
+                );
                 continue;
             }
 
@@ -566,6 +584,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 condition,
                 clause_id,
                 names,
+                favored,
             );
 
             if conflict {
@@ -598,6 +617,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         parent: VariableId,
         requirement: Requirement,
         version_set_variables: &[Vec<VariableId>],
+        favored: Option<VariableId>,
     ) {
         let gate = match self.state.requires_aux_vars.get(&requirement) {
             Some(&gate) => gate,
@@ -623,7 +643,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                     .version_sets(self.cache.provider())
                     .map(|version_set| self.cache.provider().version_set_name(version_set));
                 self.state
-                    .add_requires_clause(gate, requirement, None, clause_id, names);
+                    .add_requires_clause(gate, requirement, None, clause_id, names, favored);
 
                 // All candidates already false: the disjunction reduces to
                 // `¬gate`. The gate is a fresh helper, so just force it false
