@@ -1666,7 +1666,8 @@ impl<D: DependencyProvider, RT: AsyncRuntime> Solver<D, RT> {
 
 impl<D: DependencyProvider> SolverState<D> {
     /// Registers a newly encoded requires clause with the incremental decide
-    /// queue.
+    /// queue. `favored` is the first candidate of the requirement if the
+    /// dependency provider marked it as favored.
     pub(crate) fn add_requires_clause(
         &mut self,
         parent: VariableId,
@@ -1674,6 +1675,7 @@ impl<D: DependencyProvider> SolverState<D> {
         condition: Option<DisjunctionId>,
         clause_id: ClauseId,
         names: impl IntoIterator<Item = D::NameId>,
+        favored: Option<VariableId>,
     ) {
         self.decide_queue.register_clause(
             parent,
@@ -1681,8 +1683,9 @@ impl<D: DependencyProvider> SolverState<D> {
             condition,
             clause_id,
             names,
+            favored,
             &self.disjunctions,
-            self.decision_tracker.assigned_value(parent),
+            self.decision_tracker.map(),
         );
     }
 

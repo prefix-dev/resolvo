@@ -385,6 +385,68 @@ fn test_resolve_favor_with_conflict() {
         "###);
 }
 
+/// A favored solvable must be kept when some solution keeps it, regardless of
+/// the order in which the requirements are listed. Mirrors `pixi update
+/// cython` with a locked `python`: the newest `cython` needs a newer
+/// `python`, but an older `cython` is compatible with the favored `python`.
+#[test]
+fn test_resolve_favored_independent_of_requirement_order() {
+    let packages = [
+        ("python", 1, vec![]),
+        ("python", 2, vec![]),
+        ("cython", 1, vec!["python 1"]),
+        ("cython", 2, vec!["python 1"]),
+        ("cython", 3, vec!["python 2"]),
+    ];
+    for specs in [["cython", "python"], ["python", "cython"]] {
+        let mut provider = BundleBoxProvider::from_packages(&packages);
+        provider.set_favored("python", 1);
+        let result = solve_snapshot(provider, &specs);
+        assert_eq!(
+            result, "cython=2\npython=1\n",
+            "requirement order {specs:?}"
+        );
+    }
+}
+
+/// A favored solvable that cannot be selected must not change the solution:
+/// the solver falls back to the regular decision order. With `cython` first,
+/// that order picks `cython=2` (and so `python=2`); still prioritizing
+/// `python` would pick `python=3` (and so `cython=1`).
+#[test]
+fn test_resolve_unselectable_favored_falls_back() {
+    let packages = [
+        ("python", 1, vec![]),
+        ("python", 2, vec![]),
+        ("python", 3, vec![]),
+        ("cython", 1, vec!["python 3"]),
+        ("cython", 2, vec!["python 2"]),
+    ];
+    // `python=1` conflicts with every `cython` unless excluded or locked away.
+    let provider = |reason: &str| {
+        let mut provider = BundleBoxProvider::from_packages(&packages);
+        match reason {
+            "excluded" => provider.exclude("python", 1, "excluded"),
+            "another version locked" => provider.set_locked("python", 2),
+            _ => {}
+        }
+        provider
+    };
+    for reason in [
+        "conflicts with cython",
+        "excluded",
+        "another version locked",
+    ] {
+        for specs in [["cython", "python"], ["python", "cython"]] {
+            let expected = solve_snapshot(provider(reason), &specs);
+            let mut favored = provider(reason);
+            favored.set_favored("python", 1);
+            let result = solve_snapshot(favored, &specs);
+            assert_eq!(result, expected, "{reason}, order {specs:?}");
+        }
+    }
+}
+
 #[test]
 fn test_resolve_cyclic() {
     let mut provider =
