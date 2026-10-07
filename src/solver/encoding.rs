@@ -91,6 +91,9 @@ pub(crate) struct Encoder<'a, 'cache, D: DependencyProvider> {
     /// globally is safe.
     forbid_seen: IndexedSet<VariableId>,
 
+    /// Requirements whose candidates this encoder registered as forbid targets.
+    forbid_registered_requirements: ahash::HashSet<Requirement>,
+
     /// A set of packages that should have an at-least-once tracker.
     new_at_least_one_packages: IndexMap<D::NameId, VariableId, ahash::RandomState>,
 
@@ -204,6 +207,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             conflicting_clauses: Vec::new(),
             pending_forbid_clauses: IndexMap::default(),
             forbid_seen: IndexedSet::default(),
+            forbid_registered_requirements: ahash::HashSet::default(),
             level,
             new_at_least_one_packages: IndexMap::default(),
             pending_results: VecDeque::new(),
@@ -418,60 +422,87 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
         // skipping the clause here would lose it permanently.
 
         // Get the variables associated with the individual candidates.
-        let version_set_variables = candidates
-            .iter()
-            .map(|&candidates| {
+        let version_set_variables = self
+            .state
+            .requirement_to_sorted_candidates
+            .get_or_insert_with(requirement.requirement, || {
                 candidates
                     .iter()
-                    .map(|&var| self.state.variable_map.intern_solvable(var))
+                    .map(|&candidates| {
+                        candidates
+                            .iter()
+                            .map(|&var| self.state.variable_map.intern_solvable(var))
+                            .collect::<Vec<_>>()
+                    })
                     .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
+            });
 
         // Make sure that for every candidate that we require we also have a forbid
         // clause to force one solvable per package name.
         //
         // We only add these clauses for packages that can actually be selected to
         // reduce the overall number of clauses.
-        for (&candidates, variables) in candidates.iter().zip(version_set_variables.iter()) {
-            let Some(&first_solvable) = candidates.first() else {
-                continue;
-            };
-            let name_id = self.cache.provider().solvable_name(first_solvable);
-            debug_assert!(
-                candidates
-                    .iter()
-                    .all(|&solvable| self.cache.provider().solvable_name(solvable) == name_id),
-                "all candidates in a version set must have the same package name"
-            );
-            if self.state.allow_multiple_names.contains(name_id) {
-                continue;
-            }
-            let pending = self.pending_forbid_clauses.entry(name_id).or_default();
-            for &variable_id in variables {
-                if self.forbid_seen.insert(variable_id) {
-                    pending.push(variable_id);
+        if self
+            .forbid_registered_requirements
+            .insert(requirement.requirement)
+        {
+            for (&candidates, variables) in candidates.iter().zip(version_set_variables.iter()) {
+                let Some(&first_solvable) = candidates.first() else {
+                    continue;
+                };
+                let name_id = self.cache.provider().solvable_name(first_solvable);
+                debug_assert!(
+                    candidates.iter().all(|&solvable| self
+                        .cache
+                        .provider()
+                        .solvable_name(solvable)
+                        == name_id),
+                    "all candidates in a version set must have the same package name"
+                );
+                if self.state.allow_multiple_names.contains(name_id) {
+                    continue;
+                }
+                let pending = self.pending_forbid_clauses.entry(name_id).or_default();
+                for &variable_id in variables {
+                    if self.forbid_seen.insert(variable_id) {
+                        pending.push(variable_id);
+                    }
                 }
             }
         }
 
         // Queue requesting the dependencies of the candidates as well if they are
         // cheaply available from the dependency provider.
-        for &candidate in candidates.iter().flat_map(|solvables| solvables.iter()) {
-            // Pre-check before `queue_solvable` does the same: skips the
-            // `are_dependencies_available_for` query and the async closure
-            // setup on the hot duplicate path.
-            if self
-                .state
-                .clauses_added_for_solvable
-                .contains(SolvableIdOrRoot::from(candidate))
-            {
-                continue;
+        if self
+            .state
+            .fully_queued_requirements
+            .get(requirement.requirement)
+            .is_none()
+        {
+            let mut all_queued = true;
+            for &candidate in candidates.iter().flat_map(|solvables| solvables.iter()) {
+                // Pre-check before `queue_solvable` does the same: skips the
+                // `are_dependencies_available_for` query and the async closure
+                // setup on the hot duplicate path.
+                if self
+                    .state
+                    .clauses_added_for_solvable
+                    .contains(SolvableIdOrRoot::from(candidate))
+                {
+                    continue;
+                }
+                // If the dependencies are already available for the
+                // candidate, queue the candidate for processing.
+                if self.cache.are_dependencies_available_for(candidate) {
+                    self.queue_solvable(candidate.into())
+                } else {
+                    all_queued = false;
+                }
             }
-            // If the dependencies are already available for the
-            // candidate, queue the candidate for processing.
-            if self.cache.are_dependencies_available_for(candidate) {
-                self.queue_solvable(candidate.into())
+            if all_queued {
+                self.state
+                    .fully_queued_requirements
+                    .insert(requirement.requirement, ());
             }
         }
 
@@ -522,7 +553,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
             conditions.push(None);
         }
 
-        let candidate_count: usize = version_set_variables.iter().map(Vec::len).sum();
+        let candidate_count: usize = candidates.iter().map(|candidates| candidates.len()).sum();
 
         for condition in conditions {
             // Add the requirements clause
@@ -541,10 +572,12 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 && !variable.is_root()
                 && candidate_count >= REQUIRES_AUX_ENCODING_THRESHOLD
             {
-                self.add_shared_requires(variable, requirement.requirement, &version_set_variables);
+                self.add_shared_requires(variable, requirement.requirement);
                 continue;
             }
 
+            let version_set_variables =
+                &self.state.requirement_to_sorted_candidates[requirement.requirement];
             let condition_literals =
                 condition.map(|id| self.state.disjunctions[id].literals.as_slice());
             let (watched_literals, conflict, kind) = WatchedLiterals::requires(
@@ -575,11 +608,6 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
                 self.state.negative_assertions.push((variable, clause_id));
             }
         }
-
-        // Store resolved variables for later
-        self.state
-            .requirement_to_sorted_candidates
-            .insert(requirement.requirement, version_set_variables);
     }
 
     /// Encodes an unconditional requirement `parent -> (c1 ∨ ... ∨ cN)` through
@@ -593,12 +621,7 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
     ///
     /// This mirrors the shared-constrains encoding (see
     /// [`Encoder::on_constraint_candidates_available`]).
-    fn add_shared_requires(
-        &mut self,
-        parent: VariableId,
-        requirement: Requirement,
-        version_set_variables: &[Vec<VariableId>],
-    ) {
+    fn add_shared_requires(&mut self, parent: VariableId, requirement: Requirement) {
         let gate = match self.state.requires_aux_vars.get(&requirement) {
             Some(&gate) => gate,
             None => {
@@ -610,6 +633,8 @@ impl<'a, 'cache, D: DependencyProvider> Encoder<'a, 'cache, D> {
 
                 // The shared disjunction, encoded as a normal requires clause
                 // whose parent is the gate.
+                let version_set_variables =
+                    &self.state.requirement_to_sorted_candidates[requirement];
                 let (watched_literals, conflict, kind) = WatchedLiterals::requires(
                     gate,
                     requirement,

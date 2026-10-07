@@ -209,6 +209,12 @@ pub(crate) struct SolverState<D: DependencyProvider> {
     /// candidates.
     requirement_to_sorted_candidates: RequirementMap<RequirementCandidateVariables>,
 
+    /// Requirements whose candidates are all in `clauses_added_for_solvable`,
+    /// which the encoder therefore no longer tries to queue. Other requirements
+    /// are rechecked for every requirer, since the dependencies of a candidate
+    /// can become cheaply available later in the solve.
+    fully_queued_requirements: RequirementMap<()>,
+
     pub(crate) variable_map: VariableMap<D::NameId, D::SolvableId>,
 
     negative_assertions: Vec<(VariableId, ClauseId)>,
@@ -287,6 +293,7 @@ impl<D: DependencyProvider> Default for SolverState<D> {
             clauses: Default::default(),
             watches: Default::default(),
             requirement_to_sorted_candidates: Default::default(),
+            fully_queued_requirements: Default::default(),
             variable_map: Default::default(),
             negative_assertions: Default::default(),
             learnt_clauses: Default::default(),
