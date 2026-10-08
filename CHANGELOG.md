@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.12.1...resolvo-v0.12.2) - 2026-10-08
+
+### Other
+
+- update Rust toolchain to 1.97.1 ([#308](https://github.com/prefix-dev/resolvo/pull/308))
+- Change Rust toolchain version to 1.97.1
+- bump console from 0.16.4 to 0.16.6 ([#299](https://github.com/prefix-dev/resolvo/pull/299))
+- *(ci)* bump actions-rust-lang/setup-rust-toolchain ([#300](https://github.com/prefix-dev/resolvo/pull/300))
+- *(ci)* bump zgosalvez/github-actions-ensure-sha-pinned-actions ([#304](https://github.com/prefix-dev/resolvo/pull/304))
+- bump rand from 0.10.2 to 0.10.3 ([#305](https://github.com/prefix-dev/resolvo/pull/305))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.132 to 0.5.139 ([#303](https://github.com/prefix-dev/resolvo/pull/303))
+- bump clap from 4.6.6 to 4.6.7 ([#302](https://github.com/prefix-dev/resolvo/pull/302))
+- bump indexmap from 2.14.1 to 2.14.2 ([#297](https://github.com/prefix-dev/resolvo/pull/297))
+- process requirement candidates once ([#307](https://github.com/prefix-dev/resolvo/pull/307))
+- *(ci)* bump MarcoIeni/release-plz-action from 0.5.131 to 0.5.132 ([#294](https://github.com/prefix-dev/resolvo/pull/294))
+- bump indexmap from 2.14.0 to 2.14.1 ([#295](https://github.com/prefix-dev/resolvo/pull/295))
+- *(ci)* bump prefix-dev/setup-pixi from 0.10.1 to 0.10.2 ([#291](https://github.com/prefix-dev/resolvo/pull/291))
+
 ## [0.12.1](https://github.com/prefix-dev/resolvo/compare/resolvo-v0.12.0...resolvo-v0.12.1) - 2026-08-27
 
 ### Other
