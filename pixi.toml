@@ -13,7 +13,7 @@ test = {depends-on = ["test-rust", "test-cpp"] }
 
 # ---- Build Rust using Cargo ----
 [feature.build-rust.dependencies]
-rust = "~=1.86.0"
+rust = "=1.97.1"
 
 [feature.test-rust.tasks.test-rust]
 cmd = "cargo test"
