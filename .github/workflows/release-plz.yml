@@ -29,8 +29,6 @@ jobs:
           token: ${{ steps.octo-sts.outputs.token }}
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@f9f65f52341ba3c1d5e1901c77dc7a9e58186191 # stable
-        with:
-          toolchain: 1.97.1
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5
         env:
