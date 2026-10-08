@@ -222,7 +222,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/linux-64/libuuid-2.42-h5347b49_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/libxml2-16-2.14.6-hca6bf5a_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/libxml2-2.14.6-he237659_3.conda
-      - conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/markupsafe-3.0.3-py314h67df5f8_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/openssl-3.6.1-h35e630c_1.conda
@@ -366,15 +366,15 @@ environments:
       - conda: https://prefix.dev/conda-forge/linux-64/libstdcxx-ng-15.2.0-hdf11a46_19.conda
       - conda: https://prefix.dev/conda-forge/linux-64/libuuid-2.42-h5347b49_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/libuv-1.50.0-hb9d3cd8_0.conda
-      - conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/ninja-1.12.1-h297d8ca_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/openssl-3.6.1-h35e630c_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/python-3.14.3-h32b2ec7_101_cp314.conda
       - conda: https://prefix.dev/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/rhash-1.4.5-hb9d3cd8_0.conda
-      - conda: https://prefix.dev/conda-forge/linux-64/rust-1.86.0-h1a8d7c4_0.conda
-      - conda: https://prefix.dev/conda-forge/linux-64/rust_linux-64-1.86.0-hd641940_1.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/rust-1.97.1-hc89c8c8_2.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/rust_linux-64-1.97.1-hc94ae4a_2.conda
       - conda: https://prefix.dev/conda-forge/linux-64/tk-8.6.13-noxft_h4845f30_101.conda
       - conda: https://prefix.dev/conda-forge/linux-64/xz-5.8.2-ha02ee65_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/xz-gpl-tools-5.8.2-ha02ee65_0.conda
@@ -385,7 +385,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/noarch/libgcc-devel_linux-64-12.4.0-h1762d19_102.conda
       - conda: https://prefix.dev/conda-forge/noarch/libstdcxx-devel_linux-64-12.4.0-h1762d19_102.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.86.0-h2c6d0dc_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.97.1-h2c6d0dc_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/sysroot_linux-64-2.28-h4ee821c_9.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       osx-64:
@@ -393,7 +393,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/noarch/compiler-rt_osx-64-16.0.6-ha38d28d_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/macosx_deployment_target_osx-64-13.0-h2830193_7.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.86.0-h38e4360_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.97.1-h38e4360_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       - conda: https://prefix.dev/conda-forge/osx-64/bzip2-1.0.8-hfdf4475_7.conda
       - conda: https://prefix.dev/conda-forge/osx-64/c-ares-1.34.5-hf13058a_0.conda
@@ -436,8 +436,8 @@ environments:
       - conda: https://prefix.dev/conda-forge/osx-64/python-3.14.3-h4f44bb5_101_cp314.conda
       - conda: https://prefix.dev/conda-forge/osx-64/readline-8.3-h68b038d_0.conda
       - conda: https://prefix.dev/conda-forge/osx-64/rhash-1.4.5-ha44c9a9_0.conda
-      - conda: https://prefix.dev/conda-forge/osx-64/rust-1.86.0-h34a2095_0.conda
-      - conda: https://prefix.dev/conda-forge/osx-64/rust_osx-64-1.86.0-h37a089e_1.conda
+      - conda: https://prefix.dev/conda-forge/osx-64/rust-1.97.1-h5655b98_2.conda
+      - conda: https://prefix.dev/conda-forge/osx-64/rust_osx-64-1.97.1-hb98ad99_2.conda
       - conda: https://prefix.dev/conda-forge/osx-64/sigtool-0.1.3-h88f4db0_0.tar.bz2
       - conda: https://prefix.dev/conda-forge/osx-64/tapi-1300.6.5-h390ca13_0.conda
       - conda: https://prefix.dev/conda-forge/osx-64/tk-8.6.13-h1abcd95_1.conda
@@ -450,7 +450,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/noarch/compiler-rt_osx-arm64-16.0.6-h3808999_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/macosx_deployment_target_osx-arm64-13.0-h95484f9_7.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.86.0-hf6ec828_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.97.1-hf6ec828_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/bzip2-1.0.8-h99b78c6_7.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/c-ares-1.34.5-h5505292_0.conda
@@ -494,8 +494,8 @@ environments:
       - conda: https://prefix.dev/conda-forge/osx-arm64/python-3.14.3-h4c637c5_101_cp314.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/rhash-1.4.5-h7ab814d_0.conda
-      - conda: https://prefix.dev/conda-forge/osx-arm64/rust-1.86.0-h4ff7c5d_0.conda
-      - conda: https://prefix.dev/conda-forge/osx-arm64/rust_osx-arm64-1.86.0-hf961de1_1.conda
+      - conda: https://prefix.dev/conda-forge/osx-arm64/rust-1.97.1-h4ff7c5d_2.conda
+      - conda: https://prefix.dev/conda-forge/osx-arm64/rust_osx-arm64-1.97.1-h3e48229_2.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/sigtool-0.1.3-h44b9a77_0.tar.bz2
       - conda: https://prefix.dev/conda-forge/osx-arm64/tapi-1300.6.5-h03f4b80_0.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/tk-8.6.13-h5083fa2_1.conda
@@ -506,7 +506,7 @@ environments:
       win-64:
       - conda: https://prefix.dev/conda-forge/noarch/ca-certificates-2025.1.31-h4c7d964_1.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.86.0-h17fc481_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.97.1-h17fc481_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       - conda: https://prefix.dev/conda-forge/win-64/bzip2-1.0.8-h2466b09_7.conda
       - conda: https://prefix.dev/conda-forge/win-64/cmake-3.29.6-h400e5d1_0.conda
@@ -525,8 +525,8 @@ environments:
       - conda: https://prefix.dev/conda-forge/win-64/ninja-1.12.1-hc790b64_0.conda
       - conda: https://prefix.dev/conda-forge/win-64/openssl-3.6.1-hf411b9b_1.conda
       - conda: https://prefix.dev/conda-forge/win-64/python-3.14.3-h4b44e0e_101_cp314.conda
-      - conda: https://prefix.dev/conda-forge/win-64/rust-1.86.0-hf8d6059_0.conda
-      - conda: https://prefix.dev/conda-forge/win-64/rust_win-64-1.86.0-h4c29801_1.conda
+      - conda: https://prefix.dev/conda-forge/win-64/rust-1.97.1-hf8d6059_2.conda
+      - conda: https://prefix.dev/conda-forge/win-64/rust_win-64-1.97.1-ha913c02_2.conda
       - conda: https://prefix.dev/conda-forge/win-64/tk-8.6.13-h5226925_1.conda
       - conda: https://prefix.dev/conda-forge/win-64/ucrt-10.0.22621.0-h57928b3_1.conda
       - conda: https://prefix.dev/conda-forge/win-64/vc-14.3-h2b53caa_26.conda
@@ -561,25 +561,25 @@ environments:
       - conda: https://prefix.dev/conda-forge/linux-64/libsqlite-3.52.0-hf4e2dac_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/libstdcxx-15.2.0-h934c35e_19.conda
       - conda: https://prefix.dev/conda-forge/linux-64/libuuid-2.42-h5347b49_0.conda
-      - conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/openssl-3.6.1-h35e630c_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/python-3.14.3-h32b2ec7_101_cp314.conda
       - conda: https://prefix.dev/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
-      - conda: https://prefix.dev/conda-forge/linux-64/rust-1.86.0-h1a8d7c4_0.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/rust-1.97.1-hc89c8c8_2.conda
       - conda: https://prefix.dev/conda-forge/linux-64/tk-8.6.13-noxft_h4845f30_101.conda
       - conda: https://prefix.dev/conda-forge/linux-64/zstd-1.5.7-hb8e6e7a_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/ca-certificates-2025.1.31-hbd8a1cb_1.conda
       - conda: https://prefix.dev/conda-forge/noarch/kernel-headers_linux-64-4.18.0-he073ed8_9.conda
       - conda: https://prefix.dev/conda-forge/noarch/libgcc-devel_linux-64-12.4.0-h1762d19_102.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.86.0-h2c6d0dc_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.97.1-h2c6d0dc_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/sysroot_linux-64-2.28-h4ee821c_9.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       osx-64:
       - conda: https://prefix.dev/conda-forge/noarch/ca-certificates-2025.1.31-hbd8a1cb_1.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.86.0-h38e4360_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.97.1-h38e4360_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       - conda: https://prefix.dev/conda-forge/osx-64/bzip2-1.0.8-hfdf4475_7.conda
       - conda: https://prefix.dev/conda-forge/osx-64/libexpat-2.7.5-hcc62823_0.conda
@@ -592,13 +592,13 @@ environments:
       - conda: https://prefix.dev/conda-forge/osx-64/openssl-3.6.1-hb6871ef_1.conda
       - conda: https://prefix.dev/conda-forge/osx-64/python-3.14.3-h4f44bb5_101_cp314.conda
       - conda: https://prefix.dev/conda-forge/osx-64/readline-8.3-h68b038d_0.conda
-      - conda: https://prefix.dev/conda-forge/osx-64/rust-1.86.0-h34a2095_0.conda
+      - conda: https://prefix.dev/conda-forge/osx-64/rust-1.97.1-h5655b98_2.conda
       - conda: https://prefix.dev/conda-forge/osx-64/tk-8.6.13-h1abcd95_1.conda
       - conda: https://prefix.dev/conda-forge/osx-64/zstd-1.5.7-h8210216_2.conda
       osx-arm64:
       - conda: https://prefix.dev/conda-forge/noarch/ca-certificates-2025.1.31-hbd8a1cb_1.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.86.0-hf6ec828_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.97.1-hf6ec828_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/bzip2-1.0.8-h99b78c6_7.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/libexpat-2.7.5-hf6b4638_0.conda
@@ -611,13 +611,13 @@ environments:
       - conda: https://prefix.dev/conda-forge/osx-arm64/openssl-3.6.1-hd24854e_1.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/python-3.14.3-h4c637c5_101_cp314.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
-      - conda: https://prefix.dev/conda-forge/osx-arm64/rust-1.86.0-h4ff7c5d_0.conda
+      - conda: https://prefix.dev/conda-forge/osx-arm64/rust-1.97.1-h4ff7c5d_2.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/tk-8.6.13-h5083fa2_1.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/zstd-1.5.7-h6491c7d_2.conda
       win-64:
       - conda: https://prefix.dev/conda-forge/noarch/ca-certificates-2025.1.31-h4c7d964_1.conda
       - conda: https://prefix.dev/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.86.0-h17fc481_0.conda
+      - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.97.1-h17fc481_2.conda
       - conda: https://prefix.dev/conda-forge/noarch/tzdata-2025b-h78e105d_0.conda
       - conda: https://prefix.dev/conda-forge/win-64/bzip2-1.0.8-h2466b09_7.conda
       - conda: https://prefix.dev/conda-forge/win-64/libexpat-2.7.5-hac47afa_0.conda
@@ -628,7 +628,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/win-64/libzlib-1.3.1-h2466b09_2.conda
       - conda: https://prefix.dev/conda-forge/win-64/openssl-3.6.1-hf411b9b_1.conda
       - conda: https://prefix.dev/conda-forge/win-64/python-3.14.3-h4b44e0e_101_cp314.conda
-      - conda: https://prefix.dev/conda-forge/win-64/rust-1.86.0-hf8d6059_0.conda
+      - conda: https://prefix.dev/conda-forge/win-64/rust-1.97.1-hf8d6059_2.conda
       - conda: https://prefix.dev/conda-forge/win-64/tk-8.6.13-h5226925_1.conda
       - conda: https://prefix.dev/conda-forge/win-64/ucrt-10.0.22621.0-h57928b3_1.conda
       - conda: https://prefix.dev/conda-forge/win-64/vc-14.3-h2b53caa_26.conda
@@ -1510,18 +1510,6 @@ packages:
   license_family: MIT
   size: 47428
   timestamp: 1766419122738
-- conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
-  sha256: d4bfe88d7cb447768e31650f06257995601f89076080e76df55e3112d4e47dc4
-  md5: edb0dca6bc32e4f4789199455a1dbeb8
-  depends:
-  - __glibc >=2.17,<3.0.a0
-  - libgcc >=13
-  constrains:
-  - zlib 1.3.1 *_2
-  license: Zlib
-  license_family: Other
-  size: 60963
-  timestamp: 1727963148474
 - conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_2.conda
   sha256: 55044c403570f0dc26e6364de4dc5368e5f3fc7ff103e867c487e2b5ab2bcda9
   md5: d87ff7921124eccd67248aa483c23fec
@@ -1536,6 +1524,20 @@ packages:
     - libzlib >=1.3.2,<2.0a0
   size: 63629
   timestamp: 1774072609062
+- conda: https://prefix.dev/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
+  sha256: eb8a0db0aa570124f7d2a93d7c7f596e3390df5e047818d873baad32985fc736
+  md5: 0de0122d9570a8ab637c6b73db268389
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  constrains:
+  - zlib 1.3.2 *_3
+  license: Zlib
+  license_family: Other
+  run_exports:
+    weak:
+    - libzlib >=1.3.2,<2.0a0
+  size: 63713
+  timestamp: 1785362952714
 - conda: https://prefix.dev/conda-forge/linux-64/markupsafe-3.0.3-py314h67df5f8_1.conda
   sha256: c279be85b59a62d5c52f5dd9a4cd43ebd08933809a8416c22c3131595607d4cf
   md5: 9a17c4307d23318476d7fbf0fedc0cde
@@ -1727,20 +1729,6 @@ packages:
     - rhash >=1.4.6,<2.0a0
   size: 193775
   timestamp: 1748644872902
-- conda: https://prefix.dev/conda-forge/linux-64/rust-1.86.0-h1a8d7c4_0.conda
-  sha256: fa3b6757df927a24c3006bc5bffbac5b0c9a54b9755c08847f8a832ec1b79300
-  md5: 98eab8148e1447e79f9e03492d04e291
-  depends:
-  - __glibc >=2.17,<3.0.a0
-  - gcc_impl_linux-64
-  - libgcc >=13
-  - libzlib >=1.3.1,<2.0a0
-  - rust-std-x86_64-unknown-linux-gnu 1.86.0 h2c6d0dc_0
-  - sysroot_linux-64 >=2.17
-  license: MIT
-  license_family: MIT
-  size: 218638108
-  timestamp: 1743697775334
 - conda: https://prefix.dev/conda-forge/linux-64/rust-1.96.0-h53717f1_0.conda
   sha256: d084a53a1ce2cea8d6f9cf45108e516a629118dd3f8fb3113d87d1dcd3eea669
   md5: 5b80270d422d9fddf028cb4ce68370b2
@@ -1758,21 +1746,23 @@ packages:
     - __glibc >=2.17
   size: 171986391
   timestamp: 1780046427552
-- conda: https://prefix.dev/conda-forge/linux-64/rust_linux-64-1.86.0-hd641940_1.conda
-  sha256: 021f878851954f5f389f247b63fd9d12a5289a228b1aa07c1f725abda9c96249
-  md5: cb57fc80cedb5f89cce09c1fc49d5cb5
+- conda: https://prefix.dev/conda-forge/linux-64/rust-1.97.1-hc89c8c8_2.conda
+  sha256: b96f3c4a8a1fd896d77bbfc39dfc82e5135343c7e572fd795cfdcb3508c1ad33
+  md5: 90838e4a8933fcbf5d817adde1aa9e02
   depends:
-  - gcc_linux-64
-  - rust 1.86.0.*
-  - rust-std-x86_64-unknown-linux-gnu 1.86.0.*
+  - __glibc >=2.17,<3.0.a0
+  - gcc_impl_linux-64
+  - libgcc >=15
+  - libzlib >=1.3.2,<2.0a0
+  - rust-std-x86_64-unknown-linux-gnu 1.97.1 h2c6d0dc_2
   - sysroot_linux-64 >=2.17
-  license: BSD-3-Clause
-  license_family: BSD
+  license: MIT
+  license_family: MIT
   run_exports:
     strong_constrains:
     - __glibc >=2.17
-  size: 10862
-  timestamp: 1747300380338
+  size: 173354213
+  timestamp: 1787153431342
 - conda: https://prefix.dev/conda-forge/linux-64/rust_linux-64-1.96.0-hd58cd63_0.conda
   sha256: 5658a122375e3733c53cb9fbd107626f623b5931b0905fc5f72d36ee83fe37f8
   md5: 4172c3ed0c0c8aa610b7d279dc699046
@@ -1788,6 +1778,21 @@ packages:
     - __glibc >=2.17
   size: 11780
   timestamp: 1780932798351
+- conda: https://prefix.dev/conda-forge/linux-64/rust_linux-64-1.97.1-hc94ae4a_2.conda
+  sha256: 8b2a80bb824ba7cd8fb3da68dcc772541fcdfe1bb2bcd63f7532abb8a0b6d9e4
+  md5: 8e7b23ec77626dbf059b2cc333ce3bc5
+  depends:
+  - gcc_linux-64
+  - rust 1.97.1.*
+  - rust-std-x86_64-unknown-linux-gnu 1.97.1.*
+  - sysroot_linux-64 >=2.17
+  license: BSD-3-Clause
+  license_family: BSD
+  run_exports:
+    strong_constrains:
+    - __glibc >=2.17
+  size: 11089
+  timestamp: 1787071915946
 - conda: https://prefix.dev/conda-forge/linux-64/tk-8.6.13-noxft_h366c992_103.conda
   sha256: cafeec44494f842ffeca27e9c8b0c27ed714f93ac77ddadc6aaf726b5554ebac
   md5: cffd3bdd58090148f4cfcd831f4b26ab
@@ -2120,17 +2125,6 @@ packages:
   run_exports: {}
   size: 6989
   timestamp: 1752805904792
-- conda: https://prefix.dev/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.86.0-hf6ec828_0.conda
-  sha256: 13ece700416fd30628019ee589b8de01a66991c2ff583e876057309cd4a0b59a
-  md5: e1a76ff63763cf04e06eca94978b9dd0
-  depends:
-  - __unix
-  constrains:
-  - rust >=1.86.0,<1.86.1.0a0
-  license: MIT
-  license_family: MIT
-  size: 32999893
-  timestamp: 1743696811586
 - conda: https://prefix.dev/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.96.0-hf6ec828_0.conda
   sha256: d897ede88a854758ddf5a2b03068892dcfff52bb3ece156afeff85490cf4da58
   md5: cd82a9da3245e87386fd8fa9421d3ca9
@@ -2143,17 +2137,18 @@ packages:
   run_exports: {}
   size: 32841379
   timestamp: 1780045774956
-- conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.86.0-h38e4360_0.conda
-  sha256: 21f363d82ff18cf4532edd793258890f16c78bcb62d09720ec8077c80b5b3e21
-  md5: bf9600640e706037e6b095f910f797fb
+- conda: https://prefix.dev/conda-forge/noarch/rust-std-aarch64-apple-darwin-1.97.1-hf6ec828_2.conda
+  sha256: 4c8d8196a40a2efc67bd30833a26021d7cb63484010399d60e1480247a4cf20c
+  md5: 3f475407918d3370fc089abe933614a0
   depends:
   - __unix
   constrains:
-  - rust >=1.86.0,<1.86.1.0a0
+  - rust >=1.97.1,<1.97.2.0a0
   license: MIT
   license_family: MIT
-  size: 34776293
-  timestamp: 1743696857590
+  run_exports: {}
+  size: 34722319
+  timestamp: 1787152311232
 - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.96.0-h38e4360_0.conda
   sha256: 2a6024be0d60fa64f2c6efa764e9d872ff8557a1984f3bdf0f6ce8aa1411ab29
   md5: 5683e64a67469a977ae73288cef1aa38
@@ -2166,17 +2161,18 @@ packages:
   run_exports: {}
   size: 34491337
   timestamp: 1780045628597
-- conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.86.0-h17fc481_0.conda
-  sha256: e5f9d2507e78d2508613480ffff586e70fc181351b46999c67387fe4c31df53f
-  md5: 7c621ff4a342c29e465c92bd6d464cb3
+- conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-apple-darwin-1.97.1-h38e4360_2.conda
+  sha256: aaf2f85ce97db6597a5fea58bc3356f7a859923b1222a0b527118aab47fee8a8
+  md5: 43563570bc06f61eb82af688038639b5
   depends:
-  - __win
+  - __unix
   constrains:
-  - rust >=1.86.0,<1.86.1.0a0
+  - rust >=1.97.1,<1.97.2.0a0
   license: MIT
   license_family: MIT
-  size: 28054537
-  timestamp: 1743699089031
+  run_exports: {}
+  size: 34931227
+  timestamp: 1787152539153
 - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.96.0-h17fc481_0.conda
   sha256: fb1081db0734e99c699faef8533bc24d8472944f41ab25eda4c815459b2957d9
   md5: 986b52c97a342446ed6c57157d4af519
@@ -2189,17 +2185,18 @@ packages:
   run_exports: {}
   size: 26422351
   timestamp: 1780047734722
-- conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.86.0-h2c6d0dc_0.conda
-  sha256: 8c1c68b7a8ce9657fea7d266607c21c9a00a382c346348a232e539c8a3266e84
-  md5: 2fcc4c775a50bd2ce3ccb8dc56e4fb47
+- conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.97.1-h17fc481_2.conda
+  sha256: 201a66b76d1065ba222b5693ada45d36b080b16d42651007a9e0d45d6d4847c8
+  md5: 406b4b486b5af370fce771cbabc27ee2
   depends:
-  - __unix
+  - __win
   constrains:
-  - rust >=1.86.0,<1.86.1.0a0
+  - rust >=1.97.1,<1.97.2.0a0
   license: MIT
   license_family: MIT
-  size: 37636509
-  timestamp: 1743697574868
+  run_exports: {}
+  size: 26751805
+  timestamp: 1787154574521
 - conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.96.0-h2c6d0dc_0.conda
   sha256: e8c453fc331eedd6b7a02356d177802a2c03b0bc6490d86c0e63c15ef172d53f
   md5: cbbc8546ba8381cb792744564cec0430
@@ -2212,6 +2209,18 @@ packages:
   run_exports: {}
   size: 36676677
   timestamp: 1780046295074
+- conda: https://prefix.dev/conda-forge/noarch/rust-std-x86_64-unknown-linux-gnu-1.97.1-h2c6d0dc_2.conda
+  sha256: 5d42538c42f2e57dcbd6a8e11c4f1f98d1c96c40cd189ae7543123d45dacaa3d
+  md5: b6616e82c76df396a08d07c3218f52c4
+  depends:
+  - __unix
+  constrains:
+  - rust >=1.97.1,<1.97.2.0a0
+  license: MIT
+  license_family: MIT
+  run_exports: {}
+  size: 37611715
+  timestamp: 1787153356340
 - conda: https://prefix.dev/conda-forge/noarch/sdkroot_env_osx-64-26.0-h62b880e_7.conda
   sha256: 7e7e2556978bc9bd9628c6e39138c684082320014d708fbca0c9050df98c0968
   md5: 68a978f77c0ba6ca10ce55e188a21857
@@ -3434,15 +3443,6 @@ packages:
     - rhash >=1.4.6,<2.0a0
   size: 185180
   timestamp: 1748644989546
-- conda: https://prefix.dev/conda-forge/osx-64/rust-1.86.0-h34a2095_0.conda
-  sha256: 69b7d7eb9f6b3aaf84a09f5e07f16aa9bcbf52aec8364f572d96668d2a1c6bf1
-  md5: a9991a60df5a93e7c87ff17e5c306499
-  depends:
-  - rust-std-x86_64-apple-darwin 1.86.0 h38e4360_0
-  license: MIT
-  license_family: MIT
-  size: 232864569
-  timestamp: 1743697077267
 - conda: https://prefix.dev/conda-forge/osx-64/rust-1.96.0-h5655b98_0.conda
   sha256: dac23f4917ceb52268efe2dcf3076dd580fd487c17881eebcb62e8d41dca1bba
   md5: d0efcf568895262e164f37ecef67c419
@@ -3455,22 +3455,18 @@ packages:
     - __osx >=11.0
   size: 199304959
   timestamp: 1780045766241
-- conda: https://prefix.dev/conda-forge/osx-64/rust_osx-64-1.86.0-h37a089e_1.conda
-  sha256: 2a78fbe0200add7403ae3b9d0067ac503b25b46bc5d378f683662cf78c87f23f
-  md5: a110e35bffa7bf3ce5058f406755d08d
+- conda: https://prefix.dev/conda-forge/osx-64/rust-1.97.1-h5655b98_2.conda
+  sha256: 7a62dcd6cb6848bb931895d1a4ea1c49dc09b5ec94567f4386fe5ae026a638e7
+  md5: e742f291ec42a6440d0cd193f8d6ef24
   depends:
-  - clang_osx-64
-  - ld64_osx-64
-  - macosx_deployment_target_osx-64 >=10.13
-  - rust 1.86.0.*
-  - rust-std-x86_64-apple-darwin 1.86.0.*
-  license: BSD-3-Clause
-  license_family: BSD
+  - rust-std-x86_64-apple-darwin 1.97.1 h38e4360_2
+  license: MIT
+  license_family: MIT
   run_exports:
     strong_constrains:
-    - __osx >=10.13
-  size: 10899
-  timestamp: 1747300540404
+    - __osx >=11.0
+  size: 199351052
+  timestamp: 1787152659813
 - conda: https://prefix.dev/conda-forge/osx-64/rust_osx-64-1.96.0-h34ae2cf_0.conda
   sha256: 15dd8d358c38d6129ae04d22373624071b11a4f2055db10c12ebecc5f119710a
   md5: eeb6cefccbd0a7a976e5c86a7b9464f8
@@ -3487,6 +3483,22 @@ packages:
     - __osx >=11.0
   size: 11780
   timestamp: 1780933421744
+- conda: https://prefix.dev/conda-forge/osx-64/rust_osx-64-1.97.1-hb98ad99_2.conda
+  sha256: 2ef480e7e90d75dda117621c65b1828aeaecaca3429d6143fef3fb0c30bdea51
+  md5: fdd5af1c2711ad25bad05e91a7e13c7e
+  depends:
+  - clang_osx-64
+  - ld64_osx-64
+  - macosx_deployment_target_osx-64 >=11.0
+  - rust 1.97.1.*
+  - rust-std-x86_64-apple-darwin 1.97.1.*
+  license: BSD-3-Clause
+  license_family: BSD
+  run_exports:
+    strong_constrains:
+    - __osx >=11.0
+  size: 11034
+  timestamp: 1787072204923
 - conda: https://prefix.dev/conda-forge/osx-64/sigtool-0.1.3-h88f4db0_0.tar.bz2
   sha256: 46fdeadf8f8d725819c4306838cdfd1099cd8fe3e17bd78862a5dfdcd6de61cf
   md5: fbfb84b9de9a6939cb165c02c69b1865
@@ -4796,15 +4808,6 @@ packages:
     - rhash >=1.4.6,<2.0a0
   size: 185448
   timestamp: 1748645057503
-- conda: https://prefix.dev/conda-forge/osx-arm64/rust-1.86.0-h4ff7c5d_0.conda
-  sha256: 84eed612b108a2ac5db2eb76c5f2cd596fec8e21a3cb1eb478080d74a39fab13
-  md5: 05c1a701cdb550b46e0526c2453b7337
-  depends:
-  - rust-std-aarch64-apple-darwin 1.86.0 hf6ec828_0
-  license: MIT
-  license_family: MIT
-  size: 224722205
-  timestamp: 1743697077568
 - conda: https://prefix.dev/conda-forge/osx-arm64/rust-1.96.0-h4ff7c5d_0.conda
   sha256: 91fe26674ea4680e2c7847fdafdc76ba0956f1026eff306aa7bfc089318720c3
   md5: 7e6a23a17d56b0960ec7799402e10273
@@ -4815,22 +4818,16 @@ packages:
   run_exports: {}
   size: 179967376
   timestamp: 1780046072905
-- conda: https://prefix.dev/conda-forge/osx-arm64/rust_osx-arm64-1.86.0-hf961de1_1.conda
-  sha256: e5c090af7f954809c5f9c8a4fc5fec4b68ab3de9c0e2e7fcf3466acc88f4395e
-  md5: d86b90ef7bdffd31c0ea03f1c4c87ff5
+- conda: https://prefix.dev/conda-forge/osx-arm64/rust-1.97.1-h4ff7c5d_2.conda
+  sha256: 5181f582c32bdd39926cd8eb03957d7eb355c32bac889b6dcbd3d91b839f3c66
+  md5: 4a33cc4400d259e297e60416cd4a8927
   depends:
-  - clang_osx-arm64
-  - ld64_osx-arm64
-  - macosx_deployment_target_osx-arm64 >=11.0
-  - rust 1.86.0.*
-  - rust-std-aarch64-apple-darwin 1.86.0.*
-  license: BSD-3-Clause
-  license_family: BSD
-  run_exports:
-    strong_constrains:
-    - __osx >=11.0
-  size: 10967
-  timestamp: 1747300390503
+  - rust-std-aarch64-apple-darwin 1.97.1 hf6ec828_2
+  license: MIT
+  license_family: MIT
+  run_exports: {}
+  size: 181267329
+  timestamp: 1787152435071
 - conda: https://prefix.dev/conda-forge/osx-arm64/rust_osx-arm64-1.96.0-h35445f8_0.conda
   sha256: 98ae55a375a33418964de5cc58f2f7aa249984085907e237e5071f43f08c0d21
   md5: e2938a46ae48aa959418135e36840211
@@ -4847,6 +4844,22 @@ packages:
     - __osx >=11.0
   size: 11785
   timestamp: 1780933435412
+- conda: https://prefix.dev/conda-forge/osx-arm64/rust_osx-arm64-1.97.1-h3e48229_2.conda
+  sha256: 593d87cd26599d5066c77bdaa09b538145b66814dee44d138bf760214dab2269
+  md5: c6e61fc6b449060884f1ae271d18e53c
+  depends:
+  - clang_osx-arm64
+  - ld64_osx-arm64
+  - macosx_deployment_target_osx-arm64 >=11.0
+  - rust 1.97.1.*
+  - rust-std-aarch64-apple-darwin 1.97.1.*
+  license: BSD-3-Clause
+  license_family: BSD
+  run_exports:
+    strong_constrains:
+    - __osx >=11.0
+  size: 11070
+  timestamp: 1787071959807
 - conda: https://prefix.dev/conda-forge/osx-arm64/sigtool-0.1.3-h44b9a77_0.tar.bz2
   sha256: 70791ae00a3756830cb50451db55f63e2a42a2fa2a8f1bab1ebd36bbb7d55bff
   md5: 4a2cac04f86a4540b8c9b8d8f597848f
@@ -5460,15 +5473,6 @@ packages:
   license_family: MIT
   size: 181257
   timestamp: 1770223460931
-- conda: https://prefix.dev/conda-forge/win-64/rust-1.86.0-hf8d6059_0.conda
-  sha256: acb32e2aebf79a07b7ccd0d4c8eed49ea0c45e62489b3cd8c609314ee12a5a7d
-  md5: 6b65d15fe703b59d2f1c7e2693db5bbf
-  depends:
-  - rust-std-x86_64-pc-windows-msvc 1.86.0 h17fc481_0
-  license: MIT
-  license_family: MIT
-  size: 228028589
-  timestamp: 1743699306537
 - conda: https://prefix.dev/conda-forge/win-64/rust-1.96.0-hf8d6059_0.conda
   sha256: caac31627be2428f0091fa13737e2efb0884a0dd75d169f8e13d57d44969e1b1
   md5: 2b578f2c0e20601ef2968e779ca5f9a3
@@ -5479,18 +5483,16 @@ packages:
   run_exports: {}
   size: 194064061
   timestamp: 1780047874296
-- conda: https://prefix.dev/conda-forge/win-64/rust_win-64-1.86.0-h4c29801_1.conda
-  sha256: cb3292ca0899b38b88c42130cad8c833a8801a2fb19d828c8c044ead88ac9f82
-  md5: b4a42cff16d927c9d31e194bb7770dea
+- conda: https://prefix.dev/conda-forge/win-64/rust-1.97.1-hf8d6059_2.conda
+  sha256: 6eb531c65f51328d1cb1c07237a2b7b2a1dffb70c22570cc04533c500d32d4d4
+  md5: 957f98b3da0bcc7814947d4c8d52fef4
   depends:
-  - rust 1.86.0.*
-  - rust-std-x86_64-pc-windows-msvc 1.86.0.*
-  - vs_win-64 >=2019
-  license: BSD-3-Clause
-  license_family: BSD
+  - rust-std-x86_64-pc-windows-msvc 1.97.1 h17fc481_2
+  license: MIT
+  license_family: MIT
   run_exports: {}
-  size: 10733
-  timestamp: 1747300375442
+  size: 193690317
+  timestamp: 1787154663801
 - conda: https://prefix.dev/conda-forge/win-64/rust_win-64-1.96.0-h4e2e4d8_0.conda
   sha256: ce927fa77bb979509c11d6427e06fdc0ef96ab82f37b192f37a7412db2c38428
   md5: 45f1a5dd88157e9879c2e5202dbd37b4
@@ -5503,6 +5505,18 @@ packages:
   run_exports: {}
   size: 11648
   timestamp: 1780933088931
+- conda: https://prefix.dev/conda-forge/win-64/rust_win-64-1.97.1-ha913c02_2.conda
+  sha256: 709b8ade1ee616e10bd98dfc9a97a5d970a586681bf74e10acdf4aeb3c4b5850
+  md5: 9969a3629530a86b4eda1811c3e22838
+  depends:
+  - rust 1.97.1.*
+  - rust-std-x86_64-pc-windows-msvc 1.97.1.*
+  - vs_win-64 >=2019
+  license: BSD-3-Clause
+  license_family: BSD
+  run_exports: {}
+  size: 10863
+  timestamp: 1787071946803
 - conda: https://prefix.dev/conda-forge/win-64/tk-8.6.13-h5226925_1.conda
   sha256: 2c4e914f521ccb2718946645108c9bd3fc3216ba69aea20c2c3cedbd8db32bb1
   md5: fc048363eb8f03cd1737600a5d08aafe

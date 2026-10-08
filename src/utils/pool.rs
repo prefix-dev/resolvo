@@ -173,7 +173,7 @@ impl<VS: VersionSet, N: PackageName> Pool<VS, N> {
 
     /// Interns a version set into the [`Pool`], returning its [`VersionSetId`].
     /// The returned [`VersionSetId`] can be used to retrieve a reference to
-    /// the original version set using [`Self::resolve_version-set`].
+    /// the original version set using [`Self::resolve_version_set`].
     ///
     /// A version set is always associated with a specific package name to which
     /// it applies. The passed in package name can be retrieved using
