@@ -1,14 +1,13 @@
 ---
-source: tests/solver.rs
+source: tests/solver/main.rs
 expression: error
-snapshot_kind: text
 ---
 The following packages are incompatible
 ├─ c * can be installed with any of the following options:
 │  └─ c 1 | 2 would require
-│     └─ d >=2, <3, which can be installed with any of the following options:
+│     └─ (A) d >=2, <3, which can be installed with any of the following options:
 │        └─ d 2
 └─ b * cannot be installed because there are no viable options:
    └─ b 6 | 7 would require
       └─ d >=1, <2, which cannot be installed because there are no viable options:
-         └─ d 1, which conflicts with the versions reported above.
+         └─ d 1, which conflicts with d >=2, <3 (A)

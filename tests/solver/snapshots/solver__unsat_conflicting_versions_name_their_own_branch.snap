@@ -1,0 +1,36 @@
+---
+source: tests/solver/main.rs
+expression: error
+---
+The following packages are incompatible
+└─ app * cannot be installed because there are no viable options:
+   ├─ app 3 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  ├─ helper 2 would require
+   │  │  │  └─ (A) node >=2, <3, which cannot be installed because there are no viable options:
+   │  │  │     └─ node 2, which conflicts with node >=5, <6 (C)
+   │  │  └─ helper 1 would require
+   │  │     └─ (B) node >=1, <2, which cannot be installed because there are no viable options:
+   │  │        └─ node 1, which conflicts with node >=5, <6 (C)
+   │  └─ (C) node >=5, <6, which cannot be installed because there are no viable options:
+   │     └─ node 5, which conflicts with node >=2, <3 (A) and >=1, <2 (B)
+   ├─ app 2 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  ├─ helper 2 would require
+   │  │  │  └─ (D) node >=2, <3, which cannot be installed because there are no viable options:
+   │  │  │     └─ node 2, which conflicts with node >=4, <5 (F)
+   │  │  └─ helper 1 would require
+   │  │     └─ (E) node >=1, <2, which cannot be installed because there are no viable options:
+   │  │        └─ node 1, which conflicts with node >=4, <5 (F)
+   │  └─ (F) node >=4, <5, which cannot be installed because there are no viable options:
+   │     └─ node 4, which conflicts with node >=2, <3 (D) and >=1, <2 (E)
+   └─ app 1 would require
+      ├─ (G) node >=3, <4, which cannot be installed because there are no viable options:
+      │  └─ node 3, which conflicts with node >=2, <3 (H) and >=1, <2 (I)
+      └─ helper *, which cannot be installed because there are no viable options:
+         ├─ helper 2 would require
+         │  └─ (H) node >=2, <3, which cannot be installed because there are no viable options:
+         │     └─ node 2, which conflicts with node >=3, <4 (G)
+         └─ helper 1 would require
+            └─ (I) node >=1, <2, which cannot be installed because there are no viable options:
+               └─ node 1, which conflicts with node >=3, <4 (G)

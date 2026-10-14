@@ -1,0 +1,44 @@
+---
+source: tests/solver/main.rs
+expression: error
+---
+The following packages are incompatible
+└─ app * cannot be installed because there are no viable options:
+   ├─ app 6 would require
+   │  ├─ (A) node >=7, <8, which can be installed with any of the following options:
+   │  │  └─ node 7
+   │  └─ helper *, which cannot be installed because there are no viable options:
+   │     └─ helper 1 would require
+   │        └─ node >=1, <2, which cannot be installed because there are no viable options:
+   │           └─ node 1, which conflicts with node >=7, <8 (A)
+   ├─ app 5 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  └─ helper 1 would require
+   │  │     └─ (B) node >=1, <2, which cannot be installed because there are no viable options:
+   │  │        └─ node 1, which conflicts with node >=6, <7 (C)
+   │  └─ (C) node >=6, <7, which cannot be installed because there are no viable options:
+   │     └─ node 6, which conflicts with node >=1, <2 (B)
+   ├─ app 4 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  └─ helper 1 would require
+   │  │     └─ (D) node >=1, <2, which cannot be installed because there are no viable options:
+   │  │        └─ node 1, which conflicts with node >=5, <6 (E)
+   │  └─ (E) node >=5, <6, which cannot be installed because there are no viable options:
+   │     └─ node 5, which conflicts with node >=1, <2 (D)
+   ├─ app 3 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  └─ helper 1 would require
+   │  │     └─ (F) node >=1, <2, which cannot be installed because there are no viable options:
+   │  │        └─ node 1, which conflicts with node >=4, <5 (G)
+   │  └─ (G) node >=4, <5, which cannot be installed because there are no viable options:
+   │     └─ node 4, which conflicts with node >=1, <2 (F)
+   ├─ app 2 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  └─ helper 1, as reported above
+   │  └─ node >=3, <4, which cannot be installed because there are no viable options:
+   │     └─ node 3, which conflicts with node >=1, <2
+   └─ app 1 would require
+      ├─ helper *, which cannot be installed because there are no viable options:
+      │  └─ helper 1, as reported above
+      └─ node >=2, <3, which cannot be installed because there are no viable options:
+         └─ node 2, which conflicts with node >=1, <2

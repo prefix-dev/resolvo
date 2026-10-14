@@ -1,0 +1,27 @@
+---
+source: tests/solver/main.rs
+expression: error
+---
+The following packages are incompatible
+└─ app * cannot be installed because there are no viable options:
+   ├─ app 3 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  └─ helper 1 would require
+   │  │     └─ (A) node >=1, <9, which cannot be installed because there are no viable options:
+   │  │        └─ node 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8, which conflicts with node >=12, <13 (B)
+   │  └─ (B) node >=12, <13, which cannot be installed because there are no viable options:
+   │     └─ node 12, which conflicts with node >=1, <9 (A)
+   ├─ app 2 would require
+   │  ├─ helper *, which cannot be installed because there are no viable options:
+   │  │  └─ helper 1 would require
+   │  │     └─ (C) node >=1, <9, which cannot be installed because there are no viable options:
+   │  │        └─ node 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8, which conflicts with node >=11, <12 (D)
+   │  └─ (D) node >=11, <12, which cannot be installed because there are no viable options:
+   │     └─ node 11, which conflicts with node >=1, <9 (C)
+   └─ app 1 would require
+      ├─ helper *, which cannot be installed because there are no viable options:
+      │  └─ helper 1 would require
+      │     └─ (E) node >=1, <9, which cannot be installed because there are no viable options:
+      │        └─ node 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8, which conflicts with node >=10, <11 (F)
+      └─ (F) node >=10, <11, which cannot be installed because there are no viable options:
+         └─ node 10, which conflicts with node >=1, <9 (E)

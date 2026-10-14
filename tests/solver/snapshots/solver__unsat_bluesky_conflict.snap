@@ -1,12 +1,11 @@
 ---
-source: tests/solver.rs
+source: tests/solver/main.rs
 expression: error
-snapshot_kind: text
 ---
 The following packages are incompatible
-├─ suitcase-utils >=54, <100 can be installed with any of the following options:
+├─ (A) suitcase-utils >=54, <100 can be installed with any of the following options:
 │  └─ suitcase-utils 54
 └─ bluesky-widgets >=0, <100 cannot be installed because there are no viable options:
    └─ bluesky-widgets 42 would require
       └─ suitcase-utils >=0, <54, which cannot be installed because there are no viable options:
-         └─ suitcase-utils 53, which conflicts with the versions reported above.
+         └─ suitcase-utils 53, which conflicts with suitcase-utils >=54, <100 (A)

@@ -525,6 +525,83 @@ fn test_unsat_incompatible_root_requirements() {
     insta::assert_snapshot!(error);
 }
 
+/// A candidate names the versions it is actually up against, not every other
+/// version of itself that appears somewhere in the report.
+#[test]
+fn test_unsat_conflicting_versions_name_their_own_branch() {
+    // Every version of `app` needs both `helper` and a version of `node` that no
+    // version of `helper` can live with, so all five versions of `node` end up in
+    // the report. The two `helper` versions are alternatives though, so the `node`
+    // versions they ask for never have to hold at the same time.
+    let provider = BundleBoxProvider::from_packages(&[
+        ("node", 1, vec![]),
+        ("node", 2, vec![]),
+        ("node", 3, vec![]),
+        ("node", 4, vec![]),
+        ("node", 5, vec![]),
+        ("helper", 1, vec!["node 1..2"]),
+        ("helper", 2, vec!["node 2..3"]),
+        ("app", 1, vec!["helper", "node 3..4"]),
+        ("app", 2, vec!["helper", "node 4..5"]),
+        ("app", 3, vec!["helper", "node 5..6"]),
+    ]);
+    let error = solve_unsat(provider, &["app"]);
+    insta::assert_snapshot!(error);
+}
+
+/// A candidate with many versions names the *requirement* it conflicts with,
+/// rather than spelling out the versions that requirement resolves to.
+#[test]
+fn test_unsat_many_conflicting_versions_name_the_requirement() {
+    // `helper` accepts a wide range of `node`, so those versions are reported as
+    // one long list, while each `app` version pins a `node` of its own.
+    let provider = BundleBoxProvider::from_packages(&[
+        ("node", 1, vec![]),
+        ("node", 2, vec![]),
+        ("node", 3, vec![]),
+        ("node", 4, vec![]),
+        ("node", 5, vec![]),
+        ("node", 6, vec![]),
+        ("node", 7, vec![]),
+        ("node", 8, vec![]),
+        ("node", 10, vec![]),
+        ("node", 11, vec![]),
+        ("node", 12, vec![]),
+        ("helper", 1, vec!["node 1..9"]),
+        ("app", 1, vec!["helper", "node 10..11"]),
+        ("app", 2, vec!["helper", "node 11..12"]),
+        ("app", 3, vec!["helper", "node 12..13"]),
+    ]);
+    let error = solve_unsat(provider, &["app"]);
+    insta::assert_snapshot!(error);
+}
+
+/// The subtree of a candidate that a great many parents require is spelled out
+/// under the first few of them, and pointed at from the rest.
+#[test]
+fn test_unsat_repeated_subtrees_are_cut_off() {
+    // All six versions of `app` require `helper`, whose subtree would otherwise be
+    // repeated in full six times.
+    let provider = BundleBoxProvider::from_packages(&[
+        ("node", 1, vec![]),
+        ("node", 2, vec![]),
+        ("node", 3, vec![]),
+        ("node", 4, vec![]),
+        ("node", 5, vec![]),
+        ("node", 6, vec![]),
+        ("node", 7, vec![]),
+        ("helper", 1, vec!["node 1..2"]),
+        ("app", 1, vec!["helper", "node 2..3"]),
+        ("app", 2, vec!["helper", "node 3..4"]),
+        ("app", 3, vec!["helper", "node 4..5"]),
+        ("app", 4, vec!["helper", "node 5..6"]),
+        ("app", 5, vec!["helper", "node 6..7"]),
+        ("app", 6, vec!["helper", "node 7..8"]),
+    ]);
+    let error = solve_unsat(provider, &["app"]);
+    insta::assert_snapshot!(error);
+}
+
 #[test]
 fn test_unsat_bluesky_conflict() {
     let provider = BundleBoxProvider::from_packages(&[
