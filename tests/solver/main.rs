@@ -909,6 +909,32 @@ fn test_snapshot_highest_version_set_not_shadowed() {
     "###);
 }
 
+/// A snapshot that only covers some of the provider's packages has sparse
+/// package ids. The candidates of every captured package must still be sorted
+/// according to the original provider, not left in insertion order.
+#[test]
+fn test_snapshot_subset_of_packages_keeps_candidate_order() {
+    let provider = BundleBoxProvider::from_packages(&[
+        ("a", 1, vec![]),
+        ("b", 1, vec![]),
+        ("b", 2, vec![]),
+        ("b", 3, vec![]),
+    ]);
+
+    let b_name_id = provider.package_name("b");
+    let snapshot =
+        resolvo::snapshot::DependencySnapshot::from_provider(provider, [b_name_id], [], [])
+            .unwrap();
+
+    let mut snapshot_provider = snapshot.provider();
+    let b_req = snapshot_provider
+        .add_package_requirement(b_name_id, "*")
+        .into();
+
+    // The original provider sorts the highest version first.
+    assert_snapshot!(solve_for_snapshot(snapshot_provider, &[b_req], &[]), @"b=3");
+}
+
 #[test]
 fn test_snapshot_union_requirements() {
     let mut provider = BundleBoxProvider::from_packages(&[
