@@ -213,7 +213,7 @@ impl<'a, TId: DenseIndex, TValue> Iterator for MappingIter<'a, TId, TValue> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.offset >= self.mapping.len {
+            if self.offset > self.mapping.max {
                 return None;
             }
 
@@ -311,6 +311,24 @@ mod tests {
         assert_eq!(mapping.len(), 2);
         // And double number of slots due to resize
         assert_eq!(mapping.slots(), VALUES_PER_CHUNK * 2);
+    }
+
+    #[test]
+    pub fn test_iter_sparse() {
+        let mut mapping = Mapping::<Id, usize>::new();
+        mapping.insert(Id::from_index(3), 30usize);
+        mapping.insert(Id::from_index(VALUES_PER_CHUNK + 1), 40usize);
+
+        itertools::assert_equal(
+            mapping.iter().map(|(id, &v)| (id.id, v)),
+            [(3, 30), (VALUES_PER_CHUNK + 1, 40)],
+        );
+
+        mapping.unset(Id::from_index(3));
+        itertools::assert_equal(
+            mapping.iter().map(|(id, &v)| (id.id, v)),
+            [(VALUES_PER_CHUNK + 1, 40)],
+        );
     }
 
     #[cfg(feature = "serde")]
