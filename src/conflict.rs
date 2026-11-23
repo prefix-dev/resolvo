@@ -884,8 +884,8 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
         top_level_indent: bool,
     ) -> fmt::Result {
         pub enum DisplayOp {
-            Requirement(Requirement, Vec<EdgeIndex>),
-            Candidate(NodeIndex),
+            Requirement(Requirement, Vec<EdgeIndex>, Vec<NodeIndex>),
+            Candidate(NodeIndex, Vec<NodeIndex>),
         }
 
         let graph = &self.graph.graph;
@@ -910,7 +910,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
             })
             .map(|(version_set_id, edges)| {
                 (
-                    DisplayOp::Requirement(version_set_id, edges),
+                    DisplayOp::Requirement(version_set_id, edges, vec![self.graph.root_node]),
                     indenter.push_level(),
                 )
             })
@@ -926,7 +926,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
             let indent = indenter.get_indent();
 
             match node {
-                DisplayOp::Requirement(requirement, edges) => {
+                DisplayOp::Requirement(requirement, edges, path) => {
                     debug_assert!(!edges.is_empty());
 
                     let installable = edges.iter().any(|&e| {
@@ -965,11 +965,18 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
                             .filter(|&&e| {
                                 installable_nodes.contains(&graph.edge_endpoints(e).unwrap().1)
                             })
-                            .map(|&e| {
-                                (
-                                    DisplayOp::Candidate(graph.edge_endpoints(e).unwrap().1),
-                                    indenter.push_level(),
-                                )
+                            .filter_map(|&e| {
+                                let target = graph.edge_endpoints(e).unwrap().1;
+                                if path.contains(&target) {
+                                    None
+                                } else {
+                                    let mut child_path = path.clone();
+                                    child_path.push(target);
+                                    Some((
+                                        DisplayOp::Candidate(target, child_path),
+                                        indenter.push_level(),
+                                    ))
+                                }
                             })
                             .collect();
 
@@ -977,7 +984,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
                         let mut deduplicated_children = Vec::new();
                         let mut merged_and_seen = HashSet::new();
                         for child in children {
-                            let (DisplayOp::Candidate(child_node), _) = child else {
+                            let (DisplayOp::Candidate(child_node, _), _) = child else {
                                 unreachable!()
                             };
                             let solvable_id = graph[child_node].solvable_or_root();
@@ -1021,11 +1028,18 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
 
                         let children: Vec<_> = edges
                             .iter()
-                            .map(|&e| {
-                                (
-                                    DisplayOp::Candidate(graph.edge_endpoints(e).unwrap().1),
-                                    indenter.push_level(),
-                                )
+                            .filter_map(|&e| {
+                                let target = graph.edge_endpoints(e).unwrap().1;
+                                if path.contains(&target) {
+                                    None
+                                } else {
+                                    let mut child_path = path.clone();
+                                    child_path.push(target);
+                                    Some((
+                                        DisplayOp::Candidate(target, child_path),
+                                        indenter.push_level(),
+                                    ))
+                                }
                             })
                             .collect();
 
@@ -1033,7 +1047,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
                         let mut deduplicated_children = Vec::new();
                         let mut merged_and_seen = HashSet::new();
                         for child in children {
-                            let (DisplayOp::Candidate(child_node), _) = child else {
+                            let (DisplayOp::Candidate(child_node, _), _) = child else {
                                 unreachable!()
                             };
                             let Some(solvable_id) = graph[child_node].solvable() else {
@@ -1060,7 +1074,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
                         stack.extend(deduplicated_children);
                     }
                 }
-                DisplayOp::Candidate(candidate) => {
+                DisplayOp::Candidate(candidate, path) => {
                     let solvable_id = graph[candidate].solvable_or_root();
 
                     if reported.contains(&solvable_id) {
@@ -1167,7 +1181,7 @@ impl<'i, I: Interner> DisplayUnsat<'i, I> {
                             })
                             .map(|(version_set_id, edges)| {
                                 (
-                                    DisplayOp::Requirement(version_set_id, edges),
+                                    DisplayOp::Requirement(version_set_id, edges, path.clone()),
                                     indenter.push_level(),
                                 )
                             })
