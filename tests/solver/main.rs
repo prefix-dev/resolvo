@@ -2696,4 +2696,15 @@ mod forbid_registration_regression {
     multi=3
     ");
     }
+    #[test]
+    fn test_unsat_cyclic_dependencies() {
+        let mut provider = BundleBoxProvider::new();
+        provider.add_package("b", 1.into(), &["c"], &[]);
+        provider.add_package("b", 2.into(), &["c"], &[]);
+        provider.add_package("c", 1.into(), &["b 2..100", "b 0..2"], &[]);
+
+        let error = solve_unsat(provider, &["b"]);
+        assert!(error.contains("b >=2, <100"));
+        assert!(error.contains("b >=0, <2"));
+    }
 }
